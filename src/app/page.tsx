@@ -29,22 +29,17 @@ import {
   Save,
   Check,
 } from "lucide-react";
-
-const API_BASE = "http://localhost:8000";
-const AGENT_ID = "agent_250dvanP7H3l6vu4amnNa";
-
-interface ApiTreeEntry {
-  path: string;
-  name: string;
-  type: "file" | "directory";
-  file_class: string;
-}
-
-interface ApiFileContent {
-  path: string;
-  name: string;
-  content: string | null;
-}
+import {
+  fetchTree,
+  fetchAllContents,
+  saveFile as apiSaveFile,
+  createDirectory,
+  moveFile,
+  bulkMove,
+  copyFile,
+  bulkDelete,
+} from "@/api/agent";
+import type { ApiTreeEntry } from "@/api/agent";
 
 function getFileType(name: string, fileClass: string): string {
   if (fileClass === "skill") return "skill";
@@ -111,35 +106,6 @@ function buildNestedTree(entries: ApiTreeEntry[]): TreeViewItem[] {
   return roots;
 }
 
-async function fetchTree(): Promise<ApiTreeEntry[]> {
-  const res = await fetch(`${API_BASE}/agents/${AGENT_ID}/files/tree`);
-  return res.json();
-}
-
-async function fetchFileContent(path: string): Promise<string> {
-  const res = await fetch(
-    `${API_BASE}/agents/${AGENT_ID}/files/read?path=${encodeURIComponent(path)}`
-  );
-  const data: ApiFileContent = await res.json();
-  return data.content ?? "";
-}
-
-async function fetchAllContents(
-  entries: ApiTreeEntry[]
-): Promise<Record<string, string>> {
-  const files = entries.filter((e) => e.type === "file");
-  const results = await Promise.all(
-    files.map(async (f) => {
-      try {
-        const content = await fetchFileContent(f.path);
-        return [f.path, content] as const;
-      } catch {
-        return [f.path, ""] as const;
-      }
-    })
-  );
-  return Object.fromEntries(results);
-}
 
 const iconMap: Record<string, React.ReactNode> = {
   folder: <Folder className="h-4 w-4 text-blue-500" />,
@@ -188,11 +154,7 @@ export default function Home() {
   const saveFile = useCallback(async (path: string, content: string) => {
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/agents/${AGENT_ID}/files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, content, mime_type: "text/markdown" }),
-      });
+      await apiSaveFile(path, content);
       setDirtyTabs((prev) => {
         const next = new Set(prev);
         next.delete(path);
@@ -422,20 +384,12 @@ export default function Home() {
             const name = p.split("/").pop()!;
             return { old_path: p, new_path: `${destFolder}/${name}` };
           });
-          await fetch(`${API_BASE}/agents/${AGENT_ID}/files/bulk-mv`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ moves }),
-          });
+          await bulkMove(moves);
           clipboardRef.current = null;
         } else {
           for (const p of clip.paths) {
             const name = p.split("/").pop()!;
-            await fetch(`${API_BASE}/agents/${AGENT_ID}/files/cp`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ source_path: p, dest_path: `${destFolder}/${name}` }),
-            });
+            await copyFile(p, `${destFolder}/${name}`);
           }
         }
         await reload();
@@ -490,17 +444,9 @@ export default function Home() {
       }
       const path = `${ghostNode.parentId}/${newName}`;
       if (ghostNode.type === "file") {
-        await fetch(`${API_BASE}/agents/${AGENT_ID}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, content: "", mime_type: "text/markdown" }),
-        });
+        await apiSaveFile(path, "");
       } else {
-        await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mkdir`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path }),
-        });
+        await createDirectory(path);
       }
       setGhostNode(null);
       setEditingId(null);
@@ -513,11 +459,7 @@ export default function Home() {
       }
       const parentPath = id.substring(0, id.lastIndexOf("/"));
       const newPath = `${parentPath}/${newName}`;
-      await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mv`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ old_path: id, new_path: newPath }),
-      });
+      await moveFile(id, newPath);
       setOpenTabs((prev) =>
         prev.map((t) =>
           t.id === id ? { ...t, id: newPath, name: newName } : t
@@ -545,11 +487,7 @@ export default function Home() {
 
   const handleMoveConfirm = async () => {
     if (!pendingMove) return;
-    await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mv`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ old_path: pendingMove.oldPath, new_path: pendingMove.newPath }),
-    });
+    await moveFile(pendingMove.oldPath, pendingMove.newPath);
     setPendingMove(null);
     await reload();
   };
@@ -557,11 +495,7 @@ export default function Home() {
   const handleDeleteConfirm = async () => {
     if (!pendingDelete) return;
     const { paths } = pendingDelete;
-    await fetch(`${API_BASE}/agents/${AGENT_ID}/files/bulk-delete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paths, recursive: true }),
-    });
+    await bulkDelete(paths);
     setOpenTabs((prev) => prev.filter((t) => !paths.some((p) => t.id === p || t.id.startsWith(p + "/"))));
     setPendingDelete(null);
     await reload();
@@ -576,7 +510,7 @@ export default function Home() {
           <span>Votrix Editor</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-400">
-          <span>agent_250dvanP7H3l6vu4amnNa</span>
+          <span>{process.env.NEXT_PUBLIC_AGENT_ID}</span>
           <span className="text-gray-300">|</span>
           <span>Votrix Developers</span>
         </div>
@@ -617,11 +551,7 @@ export default function Home() {
                     setPendingMove({ oldPath: dragged.id, newPath, name: dragged.name });
                     return;
                   }
-                  await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mv`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ old_path: dragged.id, new_path: newPath }),
-                  });
+                  await moveFile(dragged.id, newPath);
                   await reload();
                 }}
               />
