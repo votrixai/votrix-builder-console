@@ -77,6 +77,7 @@ export interface TreeViewProps {
   editingId?: string | null;
   onEditCommit?: (id: string, newName: string) => void;
   onEditCancel?: (id: string) => void;
+  dropTargetId?: string | null;
 }
 
 interface TreeItemProps {
@@ -100,6 +101,7 @@ interface TreeItemProps {
   editingId?: string | null;
   onEditCommit?: (id: string, newName: string) => void;
   onEditCancel?: (id: string) => void;
+  dropTargetId?: string | null;
 }
 
 // Helper function to build a map of all items by ID
@@ -179,6 +181,7 @@ function TreeItem({
   editingId,
   onEditCommit,
   onEditCancel,
+  dropTargetId,
 }: TreeItemProps): React.ReactElement {
   const isOpen = expandedIds.has(item.id);
   const isSelected = selectedIds.has(item.id);
@@ -426,7 +429,9 @@ function TreeItem({
             data-folder-closed={item.children && !isOpen}
             className={`select-none cursor-pointer ${
               isSelected ? `bg-orange-100 ${selectionStyle}` : "text-foreground"
-            } ${dragOver ? "bg-blue-100 ring-1 ring-blue-400 rounded" : ""} px-1`}
+            } ${dragOver ? "bg-blue-100 ring-1 ring-blue-400 rounded" : ""} ${
+              dropTargetId === item.id ? "bg-blue-50 ring-2 ring-blue-400 ring-inset rounded" : ""
+            } px-1`}
             style={{ paddingLeft: `${depth * 20}px` }}
             onClick={handleClick}
             draggable
@@ -622,6 +627,7 @@ function TreeItem({
                     editingId={editingId}
                     onEditCommit={onEditCommit}
                     onEditCancel={onEditCancel}
+                    dropTargetId={dropTargetId}
                   />
                 ))}
               </CollapsibleContent>
@@ -676,6 +682,7 @@ export default function TreeView({
   editingId,
   onEditCommit,
   onEditCancel,
+  dropTargetId,
 }: TreeViewProps) {
   const [currentMousePos, setCurrentMousePos] = useState<number>(0);
   const [dragStart, setDragStart] = useState<number | null>(null);
@@ -1133,6 +1140,7 @@ export default function TreeView({
               editingId={editingId}
               onEditCommit={onEditCommit}
               onEditCancel={onEditCancel}
+              dropTargetId={dropTargetId}
             />
           ))}
         </div>

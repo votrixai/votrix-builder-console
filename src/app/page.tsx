@@ -28,6 +28,7 @@ import {
   Wrench,
   Save,
   Check,
+  ShieldAlert,
 } from "lucide-react";
 import {
   fetchTree,
@@ -150,6 +151,10 @@ export default function Home() {
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const dragCounterRef = useRef(0);
+  const [protectedNotice, setProtectedNotice] = useState(false);
 
   const saveFile = useCallback(async (path: string, content: string) => {
     setSaving(true);
@@ -218,6 +223,125 @@ export default function Home() {
   useEffect(() => {
     reload().finally(() => setLoading(false));
   }, [reload]);
+
+  // --- External drag-and-drop helpers ---
+
+  function readEntryAsFile(entry: FileSystemFileEntry): Promise<File> {
+    return new Promise((resolve, reject) => entry.file(resolve, reject));
+  }
+
+  function readDirectoryEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+    return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+  }
+
+  async function collectEntries(
+    entry: FileSystemEntry,
+    basePath: string
+  ): Promise<{ path: string; file: File | null }[]> {
+    if (entry.isFile) {
+      const file = await readEntryAsFile(entry as FileSystemFileEntry);
+      return [{ path: `${basePath}/${entry.name}`, file }];
+    }
+    const dirEntry = entry as FileSystemDirectoryEntry;
+    const dirPath = `${basePath}/${entry.name}`;
+    const results: { path: string; file: File | null }[] = [{ path: dirPath, file: null }];
+    const reader = dirEntry.createReader();
+    let batch = await readDirectoryEntries(reader);
+    while (batch.length > 0) {
+      for (const child of batch) {
+        results.push(...(await collectEntries(child, dirPath)));
+      }
+      batch = await readDirectoryEntries(reader);
+    }
+    return results;
+  }
+
+  function getDropFolder(e: React.DragEvent): string | null {
+    const target = (e.target as HTMLElement).closest("[data-id]");
+    if (!target) return null;
+    const id = target.getAttribute("data-id")!;
+    const isClosed = target.getAttribute("data-folder-closed");
+    // If it's a folder (has data-folder-closed attr), drop into it
+    if (isClosed !== null) return id;
+    // Otherwise drop into the parent folder
+    const parentPath = id.substring(0, id.lastIndexOf("/")) || null;
+    return parentPath;
+  }
+
+  const handleExternalDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    const folder = getDropFolder(e);
+    if (!folder) {
+      setDropTargetId(null);
+      return;
+    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setDropTargetId(folder);
+  }, []);
+
+  const handleExternalDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounterRef.current++;
+  }, []);
+
+  const handleExternalDragLeave = useCallback(() => {
+    dragCounterRef.current--;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDropTargetId(null);
+    }
+  }, []);
+
+  const handleExternalDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current = 0;
+      const targetFolder = getDropFolder(e);
+      setDropTargetId(null);
+
+      if (!targetFolder) return;
+
+      const items = e.dataTransfer.items;
+      if (!items || items.length === 0) return;
+
+      const entries: FileSystemEntry[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry?.();
+        if (entry) entries.push(entry);
+      }
+      if (entries.length === 0) return;
+
+      setUploading(true);
+      try {
+        const allFiles: { path: string; file: File | null }[] = [];
+        const base = targetFolder;
+        for (const entry of entries) {
+          allFiles.push(...(await collectEntries(entry, base)));
+        }
+
+        // Create directories first, then upload files
+        const dirs = allFiles.filter((f) => f.file === null);
+        const files = allFiles.filter((f) => f.file !== null);
+
+        for (const dir of dirs) {
+          await createDirectory(dir.path);
+        }
+        for (const f of files) {
+          const content = await f.file!.text();
+          await apiSaveFile(f.path, content);
+        }
+
+        await reload();
+      } catch (err) {
+        console.error("Failed to upload dropped files:", err);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [reload]
+  );
 
   const handleMouseDown = useCallback(() => {
     isResizing.current = true;
@@ -328,6 +452,14 @@ export default function Home() {
 
   const clipboardRef = useRef<{ paths: string[]; cut: boolean } | null>(null);
 
+  const PROTECTED_ROOT_FOLDERS = new Set(["system-prompts", "skills", "user-files-default"]);
+
+  const isProtectedFolder = (item: TreeViewItem) => {
+    if (item.type !== "folder") return false;
+    const segments = item.id.split("/").filter(Boolean);
+    return segments.length === 1 && PROTECTED_ROOT_FOLDERS.has(segments[0]);
+  };
+
   const contextMenuItems: TreeViewMenuItem[] = [
     {
       id: "new-file",
@@ -418,6 +550,10 @@ export default function Home() {
       icon: <Pencil className="h-4 w-4" />,
       separator: true,
       action: (items) => {
+        if (items.some(isProtectedFolder)) {
+          setProtectedNotice(true);
+          return;
+        }
         setEditingId(items[0].id);
       },
     },
@@ -426,6 +562,10 @@ export default function Home() {
       label: "Delete",
       icon: <Trash2 className="h-4 w-4 text-red-500" />,
       action: (items) => {
+        if (items.some(isProtectedFolder)) {
+          setProtectedNotice(true);
+          return;
+        }
         setPendingDelete({
           paths: items.map((i) => i.id),
           names: items.map((i) => i.name),
@@ -525,7 +665,21 @@ export default function Home() {
           <div className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
             Explorer
           </div>
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-1">
+          <div
+            className="flex-1 overflow-y-auto overflow-x-hidden px-1 relative"
+            onDragOver={handleExternalDragOver}
+            onDragEnter={handleExternalDragEnter}
+            onDragLeave={handleExternalDragLeave}
+            onDrop={handleExternalDrop}
+          >
+            {uploading && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70">
+                <div className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 shadow-md border text-sm text-gray-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Uploading files...
+                </div>
+              </div>
+            )}
             {loading ? (
               <div className="flex flex-col items-center justify-center gap-2 py-12">
                 <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
@@ -543,6 +697,7 @@ export default function Home() {
                 editingId={editingId}
                 onEditCommit={handleEditCommit}
                 onEditCancel={handleEditCancel}
+                dropTargetId={dropTargetId}
                 onDrop={async (dragged, target) => {
                   if (target.type !== "folder") return;
                   const newPath = `${target.id}/${dragged.name}`;
@@ -769,6 +924,40 @@ export default function Home() {
           <Bell className="h-3 w-3" />
         </div>
       </div>
+
+      {/* Protected folder notice */}
+      {protectedNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
+            <div className="flex items-center gap-3 border-b border-gray-200 px-5 py-4">
+              <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-900">
+                Protected Folder
+              </h3>
+            </div>
+            <div className="px-5 py-4 text-sm text-gray-600 leading-relaxed">
+              <p>
+                The <strong>system-prompts</strong>, <strong>skills</strong>, and{" "}
+                <strong>user-files-default</strong> directories are protected and
+                cannot be renamed or deleted. These folders are required for the
+                agent to function correctly.
+              </p>
+              <p className="mt-2">
+                You may still create, edit, rename, and delete files and
+                subdirectories within these folders.
+              </p>
+            </div>
+            <div className="flex justify-end border-t border-gray-200 px-5 py-3">
+              <button
+                onClick={() => setProtectedNotice(false)}
+                className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
