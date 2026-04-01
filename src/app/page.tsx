@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import TreeView from "@/components/tree-view";
 import type { TreeViewItem, TreeViewMenuItem } from "@/components/tree-view";
 import Editor from "@/components/editor";
@@ -22,293 +22,132 @@ import {
   Code2,
   GitBranch,
   Bell,
+  Loader2,
+  BookOpen,
+  Sparkles,
+  Wrench,
+  Save,
+  Check,
 } from "lucide-react";
 
-// Sample file tree data
-const fileTree: TreeViewItem[] = [
-  {
-    id: "src",
-    name: "src",
-    type: "folder",
-    children: [
-      {
-        id: "components",
-        name: "components",
+const API_BASE = "http://localhost:8000";
+const AGENT_ID = "agent_250dvanP7H3l6vu4amnNa";
+
+interface ApiTreeEntry {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  file_class: string;
+}
+
+interface ApiFileContent {
+  path: string;
+  name: string;
+  content: string | null;
+}
+
+function getFileType(name: string, fileClass: string): string {
+  if (fileClass === "skill") return "skill";
+  if (fileClass === "prompt") return "prompt";
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "json") return "json";
+  if (ext === "md") return "md";
+  if (ext === "ts" || ext === "tsx") return "tsx";
+  if (ext === "js" || ext === "jsx") return "js";
+  if (ext === "css") return "css";
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  return "file";
+}
+
+function buildNestedTree(entries: ApiTreeEntry[]): TreeViewItem[] {
+  const dirMap = new Map<string, TreeViewItem>();
+
+  // Create nodes for all directories first
+  for (const entry of entries) {
+    if (entry.type === "directory") {
+      dirMap.set(entry.path, {
+        id: entry.path,
+        name: entry.name,
         type: "folder",
-        children: [
-          { id: "button.tsx", name: "Button.tsx", type: "tsx" },
-          { id: "input.tsx", name: "Input.tsx", type: "tsx" },
-          { id: "modal.tsx", name: "Modal.tsx", type: "tsx" },
-        ],
-      },
-      {
-        id: "pages",
-        name: "pages",
-        type: "folder",
-        children: [
-          { id: "index.tsx", name: "index.tsx", type: "tsx" },
-          { id: "about.tsx", name: "about.tsx", type: "tsx" },
-        ],
-      },
-      {
-        id: "styles",
-        name: "styles",
-        type: "folder",
-        children: [
-          { id: "globals.css", name: "globals.css", type: "css" },
-          { id: "home.module.css", name: "home.module.css", type: "css" },
-        ],
-      },
-      { id: "app.tsx", name: "App.tsx", type: "tsx" },
-      { id: "utils.ts", name: "utils.ts", type: "ts" },
-    ],
-  },
-  {
-    id: "public",
-    name: "public",
-    type: "folder",
-    children: [
-      { id: "favicon.ico", name: "favicon.ico", type: "image" },
-      { id: "logo.png", name: "logo.png", type: "image" },
-    ],
-  },
-  { id: "package.json", name: "package.json", type: "json" },
-  { id: "tsconfig.json", name: "tsconfig.json", type: "json" },
-  { id: "readme.md", name: "README.md", type: "md" },
-  { id: ".gitignore", name: ".gitignore", type: "file" },
-];
-
-// Sample file contents
-const fileContents: Record<string, string> = {
-  "button.tsx": `import React from "react";
-
-interface ButtonProps {
-  children: React.ReactNode;
-  variant?: "primary" | "secondary" | "ghost";
-  size?: "sm" | "md" | "lg";
-  onClick?: () => void;
-}
-
-export function Button({
-  children,
-  variant = "primary",
-  size = "md",
-  onClick,
-}: ButtonProps) {
-  return (
-    <button
-      className={\`btn btn-\${variant} btn-\${size}\`}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}`,
-  "input.tsx": `import React from "react";
-
-interface InputProps {
-  label?: string;
-  placeholder?: string;
-  value: string;
-  onChange: (value: string) => void;
-}
-
-export function Input({ label, placeholder, value, onChange }: InputProps) {
-  return (
-    <div className="input-wrapper">
-      {label && <label>{label}</label>}
-      <input
-        type="text"
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
-  );
-}`,
-  "modal.tsx": `import React from "react";
-
-interface ModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-}
-
-export function Modal({ isOpen, onClose, title, children }: ModalProps) {
-  if (!isOpen) return null;
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{title}</h2>
-          <button onClick={onClose}>&times;</button>
-        </div>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
-  );
-}`,
-  "index.tsx": `import { Button } from "../components/Button";
-
-export default function Home() {
-  return (
-    <main>
-      <h1>Welcome to My App</h1>
-      <p>This is the home page.</p>
-      <Button variant="primary" onClick={() => alert("Hello!")}>
-        Get Started
-      </Button>
-    </main>
-  );
-}`,
-  "about.tsx": `export default function About() {
-  return (
-    <main>
-      <h1>About Us</h1>
-      <p>We build amazing software.</p>
-    </main>
-  );
-}`,
-  "globals.css": `* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.6;
-  color: #333;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}`,
-  "home.module.css": `.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.hero {
-  text-align: center;
-  padding: 4rem 0;
-}
-
-.hero h1 {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-}`,
-  "app.tsx": `import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Home from "./pages/index";
-import About from "./pages/about";
-import "./styles/globals.css";
-
-export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-      </Routes>
-    </BrowserRouter>
-  );
-}`,
-  "utils.ts": `export function formatDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
-export function debounce<T extends (...args: unknown[]) => void>(
-  fn: T,
-  delay: number
-): T {
-  let timer: ReturnType<typeof setTimeout>;
-  return ((...args: unknown[]) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  }) as T;
-}
-
-export function cn(...classes: (string | boolean | undefined)[]): string {
-  return classes.filter(Boolean).join(" ");
-}`,
-  "package.json": `{
-  "name": "my-app",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "next": "^14.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  }
-}`,
-  "tsconfig.json": `{
-  "compilerOptions": {
-    "target": "es5",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "preserve",
-    "incremental": true,
-    "paths": {
-      "@/*": ["./src/*"]
+        children: [],
+      });
     }
-  },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules"]
-}`,
-  "readme.md": `# My App
+  }
 
-A simple React application built with Next.js.
+  const roots: TreeViewItem[] = [];
 
-## Getting Started
+  for (const entry of entries) {
+    if (entry.type === "directory") continue;
 
-\`\`\`bash
-npm install
-npm run dev
-\`\`\`
+    const node: TreeViewItem = {
+      id: entry.path,
+      name: entry.name,
+      type: getFileType(entry.name, entry.file_class),
+    };
 
-## Features
+    // Find parent directory
+    const parentPath = entry.path.substring(0, entry.path.lastIndexOf("/")) || "/";
+    const parent = dirMap.get(parentPath);
+    if (parent) {
+      parent.children!.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
 
-- Component library (Button, Input, Modal)
-- Client-side routing
-- CSS Modules support
-- TypeScript
-`,
-  ".gitignore": `node_modules/
-.next/
-out/
-.env
-.env.local
-*.log
-.DS_Store`,
-};
+  // Attach subdirectories to parents
+  for (const entry of entries) {
+    if (entry.type !== "directory") continue;
+    const parentPath = entry.path.substring(0, entry.path.lastIndexOf("/")) || "/";
+    const parent = dirMap.get(parentPath);
+    const self = dirMap.get(entry.path)!;
+    if (parent && parent !== self) {
+      parent.children!.push(self);
+    } else if (!parent) {
+      roots.push(self);
+    }
+  }
+
+  return roots;
+}
+
+async function fetchTree(): Promise<ApiTreeEntry[]> {
+  const res = await fetch(`${API_BASE}/agents/${AGENT_ID}/files/tree`);
+  return res.json();
+}
+
+async function fetchFileContent(path: string): Promise<string> {
+  const res = await fetch(
+    `${API_BASE}/agents/${AGENT_ID}/files/read?path=${encodeURIComponent(path)}`
+  );
+  const data: ApiFileContent = await res.json();
+  return data.content ?? "";
+}
+
+async function fetchAllContents(
+  entries: ApiTreeEntry[]
+): Promise<Record<string, string>> {
+  const files = entries.filter((e) => e.type === "file");
+  const results = await Promise.all(
+    files.map(async (f) => {
+      try {
+        const content = await fetchFileContent(f.path);
+        return [f.path, content] as const;
+      } catch {
+        return [f.path, ""] as const;
+      }
+    })
+  );
+  return Object.fromEntries(results);
+}
 
 const iconMap: Record<string, React.ReactNode> = {
   folder: <Folder className="h-4 w-4 text-blue-500" />,
+  skill: <Sparkles className="h-4 w-4 text-amber-500" />,
+  prompt: <BookOpen className="h-4 w-4 text-violet-500" />,
   tsx: <FileCode className="h-4 w-4 text-sky-500" />,
   ts: <FileCode className="h-4 w-4 text-blue-600" />,
+  js: <FileCode className="h-4 w-4 text-yellow-500" />,
   css: <FileType className="h-4 w-4 text-purple-500" />,
   json: <FileJson className="h-4 w-4 text-yellow-600" />,
   md: <FileText className="h-4 w-4 text-gray-500" />,
@@ -331,12 +170,92 @@ interface OpenTab {
 }
 
 export default function Home() {
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: "app.tsx", name: "App.tsx", type: "tsx" },
-  ]);
-  const [activeTab, setActiveTab] = useState<string>("app.tsx");
-  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [fileTree, setFileTree] = useState<TreeViewItem[]>([]);
+  const [fileContents, setFileContents] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  const [activeTab, setActiveTab] = useState<string>("");
+  const [sidebarWidth, setSidebarWidth] = useState(260);
   const isResizing = useRef(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [ghostNode, setGhostNode] = useState<{ parentId: string; type: "file" | "folder" } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ paths: string[]; names: string[] } | null>(null);
+  const [pendingMove, setPendingMove] = useState<{ oldPath: string; newPath: string; name: string } | null>(null);
+  const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const saveFile = useCallback(async (path: string, content: string) => {
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE}/agents/${AGENT_ID}/files`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, content, mime_type: "text/markdown" }),
+      });
+      setDirtyTabs((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const handleEditorChange = useCallback(
+    (text: string) => {
+      if (!activeTab) return;
+      // Update local content
+      setFileContents((prev) => ({ ...prev, [activeTab]: text }));
+      // Mark tab as dirty
+      setDirtyTabs((prev) => new Set(prev).add(activeTab));
+      // Debounce auto-save (1 second)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const tabToSave = activeTab;
+      saveTimerRef.current = setTimeout(() => {
+        saveFile(tabToSave, text);
+      }, 1000);
+    },
+    [activeTab, saveFile]
+  );
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  // Ctrl+S / Cmd+S to save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (activeTab && dirtyTabs.has(activeTab)) {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          saveFile(activeTab, fileContents[activeTab] ?? "");
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeTab, dirtyTabs, fileContents, saveFile]);
+
+  const reload = useCallback(async () => {
+    try {
+      const treeData = await fetchTree();
+      setFileTree(buildNestedTree(treeData));
+      const contents = await fetchAllContents(treeData);
+      setFileContents(contents);
+    } catch (err) {
+      console.error("Failed to load agent files:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload().finally(() => setLoading(false));
+  }, [reload]);
 
   const handleMouseDown = useCallback(() => {
     isResizing.current = true;
@@ -412,24 +331,40 @@ export default function Home() {
 
   const activeContent = activeTab ? fileContents[activeTab] ?? "" : "";
 
+  // The item id IS the full path (e.g. "/skills/booking/SKILL.md")
   function getItemPath(item: TreeViewItem): string {
-    function find(
-      nodes: TreeViewItem[],
-      targetId: string,
-      path: string[]
-    ): string[] | null {
-      for (const node of nodes) {
-        const current = [...path, node.name];
-        if (node.id === targetId) return current;
-        if (node.children) {
-          const found = find(node.children, targetId, current);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
-    return (find(fileTree, item.id, []) ?? [item.name]).join("/");
+    return item.id;
   }
+
+  // Build tree data with ghost node injected
+  const treeDataWithGhost = React.useMemo(() => {
+    if (!ghostNode) return fileTree;
+
+    const ghostId = `__ghost__${ghostNode.parentId}/${ghostNode.type}`;
+    const ghostItem: TreeViewItem = {
+      id: ghostId,
+      name: "",
+      type: ghostNode.type === "folder" ? "folder" : "file",
+    };
+    if (ghostNode.type === "folder") {
+      ghostItem.children = [];
+    }
+
+    const insertGhost = (items: TreeViewItem[]): TreeViewItem[] =>
+      items.map((item) => {
+        if (item.id === ghostNode.parentId && item.children) {
+          return { ...item, children: [ghostItem, ...item.children] };
+        }
+        if (item.children) {
+          return { ...item, children: insertGhost(item.children) };
+        }
+        return item;
+      });
+
+    return insertGhost(fileTree);
+  }, [fileTree, ghostNode]);
+
+  const clipboardRef = useRef<{ paths: string[]; cut: boolean } | null>(null);
 
   const contextMenuItems: TreeViewMenuItem[] = [
     {
@@ -439,9 +374,8 @@ export default function Home() {
       showFor: (item) => item.type === "folder",
       action: (items) => {
         const folder = items[0];
-        const name = prompt("New file name:");
-        if (!name) return;
-        console.log(`Create file "${name}" in folder "${folder.name}"`);
+        setGhostNode({ parentId: folder.id, type: "file" });
+        setEditingId(`__ghost__${folder.id}/file`);
       },
     },
     {
@@ -451,9 +385,8 @@ export default function Home() {
       showFor: (item) => item.type === "folder",
       action: (items) => {
         const folder = items[0];
-        const name = prompt("New folder name:");
-        if (!name) return;
-        console.log(`Create folder "${name}" in folder "${folder.name}"`);
+        setGhostNode({ parentId: folder.id, type: "folder" });
+        setEditingId(`__ghost__${folder.id}/folder`);
       },
     },
     {
@@ -462,7 +395,7 @@ export default function Home() {
       icon: <Scissors className="h-4 w-4" />,
       separator: true,
       action: (items) => {
-        console.log(`Cut "${items[0].name}"`);
+        clipboardRef.current = { paths: items.map((i) => i.id), cut: true };
       },
     },
     {
@@ -470,7 +403,42 @@ export default function Home() {
       label: "Copy",
       icon: <Copy className="h-4 w-4" />,
       action: (items) => {
-        console.log(`Copy "${items[0].name}"`);
+        clipboardRef.current = { paths: items.map((i) => i.id), cut: false };
+      },
+    },
+    {
+      id: "paste",
+      label: "Paste",
+      icon: <ClipboardCopy className="h-4 w-4" />,
+      action: async (items) => {
+        const clip = clipboardRef.current;
+        if (!clip || clip.paths.length === 0) return;
+        const target = items[0];
+        const destFolder = target.type === "folder"
+          ? target.id
+          : target.id.substring(0, target.id.lastIndexOf("/"));
+        if (clip.cut) {
+          const moves = clip.paths.map((p) => {
+            const name = p.split("/").pop()!;
+            return { old_path: p, new_path: `${destFolder}/${name}` };
+          });
+          await fetch(`${API_BASE}/agents/${AGENT_ID}/files/bulk-mv`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ moves }),
+          });
+          clipboardRef.current = null;
+        } else {
+          for (const p of clip.paths) {
+            const name = p.split("/").pop()!;
+            await fetch(`${API_BASE}/agents/${AGENT_ID}/files/cp`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ source_path: p, dest_path: `${destFolder}/${name}` }),
+            });
+          }
+        }
+        await reload();
       },
     },
     {
@@ -479,9 +447,7 @@ export default function Home() {
       icon: <ClipboardCopy className="h-4 w-4" />,
       separator: true,
       action: (items) => {
-        const fullPath = `/project/${getItemPath(items[0])}`;
-        navigator.clipboard.writeText(fullPath);
-        console.log(`Copied path: ${fullPath}`);
+        navigator.clipboard.writeText(getItemPath(items[0]));
       },
     },
     {
@@ -489,9 +455,7 @@ export default function Home() {
       label: "Copy Relative Path",
       icon: <ClipboardCopy className="h-4 w-4" />,
       action: (items) => {
-        const relPath = getItemPath(items[0]);
-        navigator.clipboard.writeText(relPath);
-        console.log(`Copied relative path: ${relPath}`);
+        navigator.clipboard.writeText(getItemPath(items[0]));
       },
     },
     {
@@ -500,10 +464,7 @@ export default function Home() {
       icon: <Pencil className="h-4 w-4" />,
       separator: true,
       action: (items) => {
-        const item = items[0];
-        const newName = prompt("Rename to:", item.name);
-        if (!newName || newName === item.name) return;
-        console.log(`Rename "${item.name}" to "${newName}"`);
+        setEditingId(items[0].id);
       },
     },
     {
@@ -511,13 +472,100 @@ export default function Home() {
       label: "Delete",
       icon: <Trash2 className="h-4 w-4 text-red-500" />,
       action: (items) => {
-        const item = items[0];
-        if (confirm(`Delete "${item.name}"?`)) {
-          console.log(`Delete "${item.name}"`);
-        }
+        setPendingDelete({
+          paths: items.map((i) => i.id),
+          names: items.map((i) => i.name),
+        });
       },
     },
   ];
+
+  const handleEditCommit = async (id: string, newName: string) => {
+    if (id.startsWith("__ghost__")) {
+      // Ghost node commit — create new file or folder
+      if (!ghostNode || !newName) {
+        setGhostNode(null);
+        setEditingId(null);
+        return;
+      }
+      const path = `${ghostNode.parentId}/${newName}`;
+      if (ghostNode.type === "file") {
+        await fetch(`${API_BASE}/agents/${AGENT_ID}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path, content: "", mime_type: "text/markdown" }),
+        });
+      } else {
+        await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mkdir`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }),
+        });
+      }
+      setGhostNode(null);
+      setEditingId(null);
+      await reload();
+    } else {
+      // Rename commit
+      if (!newName || newName === id.split("/").pop()) {
+        setEditingId(null);
+        return;
+      }
+      const parentPath = id.substring(0, id.lastIndexOf("/"));
+      const newPath = `${parentPath}/${newName}`;
+      await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ old_path: id, new_path: newPath }),
+      });
+      setOpenTabs((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, id: newPath, name: newName } : t
+        )
+      );
+      if (activeTab === id) setActiveTab(newPath);
+      setEditingId(null);
+      await reload();
+    }
+  };
+
+  const handleEditCancel = (id: string) => {
+    if (id.startsWith("__ghost__")) {
+      setGhostNode(null);
+    }
+    setEditingId(null);
+  };
+
+  // Check if a path exists in the current file tree
+  const pathExists = useCallback((path: string): boolean => {
+    const check = (items: TreeViewItem[]): boolean =>
+      items.some((item) => item.id === path || (item.children && check(item.children)));
+    return check(fileTree);
+  }, [fileTree]);
+
+  const handleMoveConfirm = async () => {
+    if (!pendingMove) return;
+    await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mv`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old_path: pendingMove.oldPath, new_path: pendingMove.newPath }),
+    });
+    setPendingMove(null);
+    await reload();
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    const { paths } = pendingDelete;
+    await fetch(`${API_BASE}/agents/${AGENT_ID}/files/bulk-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths, recursive: true }),
+    });
+    setOpenTabs((prev) => prev.filter((t) => !paths.some((p) => t.id === p || t.id.startsWith(p + "/"))));
+    setPendingDelete(null);
+    await reload();
+  };
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
@@ -528,7 +576,9 @@ export default function Home() {
           <span>Votrix Editor</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-400">
-          <span>my-app</span>
+          <span>agent_250dvanP7H3l6vu4amnNa</span>
+          <span className="text-gray-300">|</span>
+          <span>Votrix Developers</span>
         </div>
       </div>
 
@@ -542,19 +592,40 @@ export default function Home() {
             Explorer
           </div>
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-1">
-            <TreeView
-              data={fileTree}
-              iconMap={iconMap}
-              showExpandAll
-              className="tree-view-light"
-              searchPlaceholder="Search files..."
-              menuItems={contextMenuItems}
-              onSelectionChange={handleSelectionChange}
-              onDrop={(dragged, target) => {
-                const dest = target.type === "folder" ? target.name : "root";
-                console.log(`Moved "${dragged.name}" into "${dest}"`);
-              }}
-            />
+            {loading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-12">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <span className="text-xs text-gray-400">Loading agent files...</span>
+              </div>
+            ) : (
+              <TreeView
+                data={treeDataWithGhost}
+                iconMap={iconMap}
+                showExpandAll
+                className="tree-view-light"
+                searchPlaceholder="Search files..."
+                menuItems={contextMenuItems}
+                onSelectionChange={handleSelectionChange}
+                editingId={editingId}
+                onEditCommit={handleEditCommit}
+                onEditCancel={handleEditCancel}
+                onDrop={async (dragged, target) => {
+                  if (target.type !== "folder") return;
+                  const newPath = `${target.id}/${dragged.name}`;
+                  if (newPath === dragged.id) return; // same location
+                  if (pathExists(newPath)) {
+                    setPendingMove({ oldPath: dragged.id, newPath, name: dragged.name });
+                    return;
+                  }
+                  await fetch(`${API_BASE}/agents/${AGENT_ID}/files/mv`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ old_path: dragged.id, new_path: newPath }),
+                  });
+                  await reload();
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -566,6 +637,52 @@ export default function Home() {
 
         {/* Editor area */}
         <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Move/replace confirmation bar */}
+          {pendingMove && (
+            <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm">
+              <Copy className="h-4 w-4 text-amber-600 shrink-0" />
+              <span className="text-gray-700">
+                <strong>{pendingMove.name}</strong> already exists in the destination. Replace it?
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => setPendingMove(null)}
+                  className="rounded px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleMoveConfirm}
+                  className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+                >
+                  Replace
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Delete confirmation bar */}
+          {pendingDelete && (
+            <div className="flex items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-2 text-sm">
+              <Trash2 className="h-4 w-4 text-red-500 shrink-0" />
+              <span className="text-gray-700">
+                Delete <strong>{pendingDelete.names.join(", ")}</strong>?
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => setPendingDelete(null)}
+                  className="rounded px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          )}
           {/* Tabs */}
           {openTabs.length > 0 && (
             <div className="flex h-9 items-center border-b border-gray-200 bg-gray-50/50">
@@ -584,6 +701,9 @@ export default function Home() {
                       <FileText className="h-3.5 w-3.5" />
                     )}
                     <span className="font-medium">{tab.name}</span>
+                    {dirtyTabs.has(tab.id) && (
+                      <span className="h-2 w-2 rounded-full bg-gray-400" title="Unsaved changes" />
+                    )}
                   </span>
                   <button
                     onClick={(e) => {
@@ -602,9 +722,42 @@ export default function Home() {
           {/* Breadcrumb */}
           {activeTab && (
             <div className="flex h-7 items-center border-b border-gray-100 bg-white px-4 text-[11px] text-gray-400">
-              <span>src</span>
-              <span className="mx-1">/</span>
-              <span className="text-gray-600">{activeTab}</span>
+              <div className="flex-1 flex items-center">
+              {activeTab
+                .split("/")
+                .filter(Boolean)
+                .map((segment, i, arr) => (
+                  <span key={i} className="flex items-center">
+                    {i > 0 && <span className="mx-1">/</span>}
+                    <span className={i === arr.length - 1 ? "text-gray-600" : ""}>
+                      {segment}
+                    </span>
+                  </span>
+                ))}
+              </div>
+              {dirtyTabs.has(activeTab) ? (
+                <button
+                  onClick={() => {
+                    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+                    saveFile(activeTab, fileContents[activeTab] ?? "");
+                  }}
+                  disabled={saving}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                  title="Save (auto-saves after 1s)"
+                >
+                  {saving ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Save className="h-3 w-3" />
+                  )}
+                  Save
+                </button>
+              ) : (
+                <span className="flex items-center gap-1 text-[11px] text-green-500">
+                  <Check className="h-3 w-3" />
+                  Saved
+                </span>
+              )}
             </div>
           )}
 
@@ -650,7 +803,7 @@ export default function Home() {
                 }
 
                 return (
-                  <Editor key={activeTab} content={activeContent} />
+                  <Editor key={activeTab} content={activeContent} onChange={handleEditorChange} />
                 );
               })()
             ) : (

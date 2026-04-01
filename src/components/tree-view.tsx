@@ -74,6 +74,9 @@ export interface TreeViewProps {
   onDrop?: (draggedItem: TreeViewItem, targetItem: TreeViewItem) => void;
   iconMap?: TreeViewIconMap;
   menuItems?: TreeViewMenuItem[];
+  editingId?: string | null;
+  onEditCommit?: (id: string, newName: string) => void;
+  onEditCancel?: (id: string) => void;
 }
 
 interface TreeItemProps {
@@ -94,6 +97,9 @@ interface TreeItemProps {
   menuItems?: TreeViewMenuItem[];
   getSelectedItems: () => TreeViewItem[];
   onDrop?: (draggedItem: TreeViewItem, targetItem: TreeViewItem) => void;
+  editingId?: string | null;
+  onEditCommit?: (id: string, newName: string) => void;
+  onEditCancel?: (id: string) => void;
 }
 
 // Helper function to build a map of all items by ID
@@ -170,6 +176,9 @@ function TreeItem({
   menuItems,
   getSelectedItems,
   onDrop,
+  editingId,
+  onEditCommit,
+  onEditCancel,
 }: TreeItemProps): React.ReactElement {
   const isOpen = expandedIds.has(item.id);
   const isSelected = selectedIds.has(item.id);
@@ -316,6 +325,48 @@ function TreeItem({
     return iconMap[item.type] || iconMap.folder || defaultIconMap.folder;
   };
 
+  const isEditing = editingId === item.id;
+
+  const renderNameOrInput = () => {
+    if (!isEditing) {
+      return <span className="flex-1">{item.name}</span>;
+    }
+    return (
+      <input
+        autoFocus
+        defaultValue={item.name}
+        className="flex-1 h-5 px-1 text-sm border border-blue-500 rounded outline-none bg-white"
+        onClick={(e) => e.stopPropagation()}
+        onFocus={(e) => {
+          // Select filename without extension for files, select all for folders
+          const val = e.target.value;
+          const dotIndex = val.lastIndexOf(".");
+          if (dotIndex > 0 && item.type !== "folder") {
+            e.target.setSelectionRange(0, dotIndex);
+          } else {
+            e.target.select();
+          }
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const val = (e.target as HTMLInputElement).value.trim();
+            if (val && onEditCommit) onEditCommit(item.id, val);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            if (onEditCancel) onEditCancel(item.id);
+          }
+        }}
+        onBlur={(e) => {
+          const val = e.target.value.trim();
+          if (val && onEditCommit) onEditCommit(item.id, val);
+          else if (onEditCancel) onEditCancel(item.id);
+        }}
+      />
+    );
+  };
+
   const getItemPath = (item: TreeViewItem, items: TreeViewItem[]): string => {
     const path: string[] = [item.name];
 
@@ -447,7 +498,7 @@ function TreeItem({
                     </div>
                   )}
                   {renderIcon()}
-                  <span className="flex-1">{item.name}</span>
+                  {renderNameOrInput()}
                   {selectedCount !== null && selectedCount > 0 && (
                     <Badge
                       variant="secondary"
@@ -512,7 +563,8 @@ function TreeItem({
                     </div>
                   )}
                   {renderIcon()}
-                  <span className="flex-1">{item.name}</span>
+                  {renderNameOrInput()}
+                  {!isEditing && (
                   <HoverCard>
                     <HoverCardTrigger render={<Button variant="ghost" size="sm" className="h-6 w-6 p-0 group-hover:opacity-100 opacity-0 items-center justify-center" onClick={(e) => e.stopPropagation()} />}><Info className="h-4 w-4 text-muted-foreground" /></HoverCardTrigger>
                     <HoverCardContent className="w-80">
@@ -535,6 +587,7 @@ function TreeItem({
                       </div>
                     </HoverCardContent>
                   </HoverCard>
+                  )}
                 </div>
               )}
             </div>
@@ -566,6 +619,9 @@ function TreeItem({
                     menuItems={menuItems}
                     getSelectedItems={getSelectedItems}
                     onDrop={onDrop}
+                    editingId={editingId}
+                    onEditCommit={onEditCommit}
+                    onEditCancel={onEditCancel}
                   />
                 ))}
               </CollapsibleContent>
@@ -617,6 +673,9 @@ export default function TreeView({
   onCheckChange,
   onDrop,
   menuItems,
+  editingId,
+  onEditCommit,
+  onEditCancel,
 }: TreeViewProps) {
   const [currentMousePos, setCurrentMousePos] = useState<number>(0);
   const [dragStart, setDragStart] = useState<number | null>(null);
@@ -624,7 +683,20 @@ export default function TreeView({
     x: number;
     y: number;
   } | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    // Start with all folders expanded
+    const collectFolderIds = (items: TreeViewItem[]): string[] => {
+      const ids: string[] = [];
+      for (const item of items) {
+        if (item.children) {
+          ids.push(item.id);
+          ids.push(...collectFolderIds(item.children));
+        }
+      }
+      return ids;
+    };
+    return new Set(collectFolderIds(data));
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -634,6 +706,28 @@ export default function TreeView({
   const treeRef = useRef<HTMLDivElement>(null);
 
   const DRAG_THRESHOLD = 10; // pixels
+
+  // Expand any new folders when data changes
+  useEffect(() => {
+    const collectFolderIds = (items: TreeViewItem[]): string[] => {
+      const ids: string[] = [];
+      for (const item of items) {
+        if (item.children) {
+          ids.push(item.id);
+          ids.push(...collectFolderIds(item.children));
+        }
+      }
+      return ids;
+    };
+    const allFolderIds = collectFolderIds(data);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of allFolderIds) {
+        next.add(id);
+      }
+      return next;
+    });
+  }, [data]);
 
   // Create a map of all items by ID
   const itemMap = useMemo(() => buildItemMap(data), [data]);
@@ -1036,6 +1130,9 @@ export default function TreeView({
               menuItems={menuItems}
               getSelectedItems={getSelectedItems}
               onDrop={onDrop}
+              editingId={editingId}
+              onEditCommit={onEditCommit}
+              onEditCancel={onEditCancel}
             />
           ))}
         </div>

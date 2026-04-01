@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
+import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $getRoot, $createParagraphNode, $createTextNode } from "lexical";
+import { $getRoot, $createParagraphNode, $createTextNode, EditorState } from "lexical";
 
 const theme = {
   paragraph: "editor-paragraph",
@@ -32,13 +33,34 @@ function SetContentPlugin({ content }: { content: string }) {
   return null;
 }
 
-export default function Editor({ content }: { content: string }) {
+export default function Editor({
+  content,
+  onChange,
+}: {
+  content: string;
+  onChange?: (text: string) => void;
+}) {
   const initialConfig = {
     namespace: "CodeEditor",
     theme,
     onError: (error: Error) => console.error(error),
     editorState: undefined,
   };
+
+  const handleChange = useCallback(
+    (editorState: EditorState) => {
+      if (!onChange) return;
+      editorState.read(() => {
+        const root = $getRoot();
+        const text = root
+          .getChildren()
+          .map((node) => node.getTextContent())
+          .join("\n");
+        onChange(text);
+      });
+    },
+    [onChange]
+  );
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
@@ -51,6 +73,7 @@ export default function Editor({ content }: { content: string }) {
         />
         <HistoryPlugin />
         <SetContentPlugin content={content} />
+        <OnChangePlugin onChange={handleChange} ignoreSelectionChange />
       </div>
     </LexicalComposer>
   );
