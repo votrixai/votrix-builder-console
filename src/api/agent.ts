@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE!;
 const AGENT_ID = process.env.NEXT_PUBLIC_AGENT_ID!;
 
 export interface ApiTreeEntry {
