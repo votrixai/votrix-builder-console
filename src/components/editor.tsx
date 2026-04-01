@@ -14,10 +14,17 @@ const theme = {
   paragraph: "editor-paragraph",
 };
 
-function SetContentPlugin({ content }: { content: string }) {
+function SetContentPlugin({
+  content,
+  lastEditorTextRef,
+}: {
+  content: string;
+  lastEditorTextRef: React.MutableRefObject<string | null>;
+}) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
+    if (content === lastEditorTextRef.current) return;
     editor.update(() => {
       const root = $getRoot();
       root.clear();
@@ -28,7 +35,8 @@ function SetContentPlugin({ content }: { content: string }) {
         root.append(paragraph);
       }
     });
-  }, [editor, content]);
+    lastEditorTextRef.current = content;
+  }, [editor, content, lastEditorTextRef]);
 
   return null;
 }
@@ -47,6 +55,8 @@ export default function Editor({
     editorState: undefined,
   };
 
+  const lastEditorTextRef = useRef<string | null>(null);
+
   const handleChange = useCallback(
     (editorState: EditorState) => {
       if (!onChange) return;
@@ -56,6 +66,7 @@ export default function Editor({
           .getChildren()
           .map((node) => node.getTextContent())
           .join("\n");
+        lastEditorTextRef.current = text;
         onChange(text);
       });
     },
@@ -72,7 +83,7 @@ export default function Editor({
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
-        <SetContentPlugin content={content} />
+        <SetContentPlugin content={content} lastEditorTextRef={lastEditorTextRef} />
         <OnChangePlugin onChange={handleChange} ignoreSelectionChange />
       </div>
     </LexicalComposer>
