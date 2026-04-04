@@ -33,15 +33,24 @@ const previewToolbarControl =
 
 type AnyPart = UIMessage["parts"][number];
 
+function toolPartName(part: AnyPart): string {
+  if (!isToolUIPart(part)) return "tool";
+  return part.type === "dynamic-tool"
+    ? (part as { toolName: string }).toolName
+    : String(part.type).replace(/^tool-/, "");
+}
+
+function toolPartCallId(part: AnyPart): string | undefined {
+  const id = (part as { toolCallId?: string }).toolCallId;
+  return typeof id === "string" && id ? id : undefined;
+}
+
 function ToolCallRow({ part }: { part: AnyPart }) {
   const [open, setOpen] = useState(false);
 
   if (!isToolUIPart(part)) return null;
 
-  const name =
-    part.type === "dynamic-tool"
-      ? (part as { toolName: string }).toolName
-      : String(part.type).replace(/^tool-/, "");
+  const name = toolPartName(part);
 
   const hasOutput =
     (part as { state?: string }).state === "output-available" &&
@@ -122,9 +131,78 @@ function TracePanel({ messages }: { messages: UIMessage[] }) {
             No tool calls yet.
           </p>
         ) : (
-          toolParts.map((part, i) => <ToolCallRow key={i} part={part} />)
+          toolParts.map((part, i) => (
+            <ToolCallRow key={toolPartCallId(part) ?? `trace-${i}`} part={part} />
+          ))
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assistant tool cards — one bubble each, above the text reply
+// ---------------------------------------------------------------------------
+
+function AssistantToolCard({ part }: { part: AnyPart }) {
+  const [open, setOpen] = useState(false);
+
+  if (!isToolUIPart(part)) return null;
+
+  const name = toolPartName(part);
+  const hasOutput =
+    (part as { state?: string }).state === "output-available" &&
+    (part as { output?: unknown }).output != null;
+  const input = (part as { input?: unknown }).input;
+  const output = (part as { output?: unknown }).output;
+
+  return (
+    <div className="max-w-[min(100%,42rem)] rounded-2xl border border-slate-200/80 bg-white text-sm text-slate-800 shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-2xl px-4 py-2.5 text-left hover:bg-slate-50/80"
+      >
+        <ChevronRight
+          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        />
+        <Wrench className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
+        <span className="flex-1 truncate font-mono text-xs font-semibold text-slate-700">
+          {name}
+        </span>
+        {hasOutput ? (
+          <span className="shrink-0 text-xs font-medium text-green-600">Done</span>
+        ) : (
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-500" aria-hidden />
+        )}
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-slate-100 px-4 pb-4 pt-3">
+          {input != null && (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Parameters
+              </p>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 font-mono text-[11px] text-slate-600">
+                {typeof input === "string" ? input : JSON.stringify(input, null, 2)}
+              </pre>
+            </div>
+          )}
+          {hasOutput && (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Result
+              </p>
+              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-200 bg-slate-50/80 p-2.5 font-mono text-[11px] text-slate-600">
+                {typeof output === "string"
+                  ? output
+                  : JSON.stringify(output, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -140,41 +218,34 @@ function MessageBubble({ message }: { message: UIMessage }) {
 
   if (textParts.length === 0 && toolParts.length === 0) return null;
 
-  return (
-    <div className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[min(100%,42rem)] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
-          isUser
-            ? "bg-slate-900 text-white"
-            : "border border-slate-200/80 bg-white text-slate-800"
-        }`}
-      >
-        {textParts.map((part, i) => (
-          <p key={i} className="whitespace-pre-wrap break-words">
-            {part.text}
-          </p>
-        ))}
-        {toolParts.map((part, i) => {
-          const name =
-            part.type === "dynamic-tool"
-              ? (part as { toolName: string }).toolName
-              : String(part.type).replace(/^tool-/, "");
-          return (
-            <div
-              key={i}
-              className="mt-2 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-500 first:mt-0"
-            >
-              <Wrench className="h-3 w-3 shrink-0" aria-hidden />
-              <span className="font-mono font-medium">{name}</span>
-              {(part as { state?: string }).state === "output-available" ? (
-                <span className="ml-auto text-green-600">✓</span>
-              ) : (
-                <Loader2 className="ml-auto h-3 w-3 animate-spin" aria-hidden />
-              )}
-            </div>
-          );
-        })}
+  if (isUser) {
+    return (
+      <div className="flex w-full justify-end">
+        <div className="max-w-[min(100%,42rem)] rounded-2xl bg-slate-900 px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm">
+          {textParts.map((part, i) => (
+            <p key={i} className="whitespace-pre-wrap break-words">
+              {part.text}
+            </p>
+          ))}
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="flex w-full flex-col items-start gap-2">
+      {toolParts.map((part, i) => (
+        <AssistantToolCard key={toolPartCallId(part) ?? `tool-${i}`} part={part} />
+      ))}
+      {textParts.length > 0 && (
+        <div className="max-w-[min(100%,42rem)] rounded-2xl border border-slate-200/80 bg-white px-4 py-2.5 text-sm leading-relaxed text-slate-800 shadow-sm">
+          {textParts.map((part, i) => (
+            <p key={i} className="whitespace-pre-wrap break-words">
+              {part.text}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

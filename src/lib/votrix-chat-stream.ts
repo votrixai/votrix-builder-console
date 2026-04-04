@@ -2,8 +2,13 @@ import { randomUUID } from "crypto";
 
 type VotrixSsePayload =
   | { type: "token"; content?: string }
-  | { type: "tool_start"; tool_call_id?: string; name?: string }
-  | { type: "tool_end"; tool_call_id?: string }
+  | {
+      type: "tool_start";
+      tool_call_id?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+    }
+  | { type: "tool_end"; tool_call_id?: string; output?: unknown }
   | { type: "done" }
   | { type: "error"; message?: string };
 
@@ -80,6 +85,10 @@ export function votrixSseToAiUiMessageStream(
         yield* ensureStart();
         const tcid = payload.tool_call_id || randomUUID();
         const toolName = payload.name || "tool";
+        const toolInput =
+          payload.input && typeof payload.input === "object" && !Array.isArray(payload.input)
+            ? payload.input
+            : {};
         yield encodeSse({
           type: "tool-input-start",
           toolCallId: tcid,
@@ -90,16 +99,20 @@ export function votrixSseToAiUiMessageStream(
           type: "tool-input-available",
           toolCallId: tcid,
           toolName,
-          input: {},
+          input: toolInput,
           dynamic: true,
         });
         break;
       }
       case "tool_end": {
+        const out =
+          payload.output !== undefined && payload.output !== null
+            ? payload.output
+            : { status: "completed" as const };
         yield encodeSse({
           type: "tool-output-available",
           toolCallId: payload.tool_call_id || "",
-          output: { status: "completed" },
+          output: out,
         });
         break;
       }
