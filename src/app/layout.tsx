@@ -8,8 +8,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Votrix Editor",
-  description: "A simple VS Code-like file editor",
+  title: "Votrix Builder",
+  description: "Agent workspace: editor, tools, and preview",
 };
 
 export default function RootLayout({
