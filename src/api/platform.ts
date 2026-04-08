@@ -113,11 +113,17 @@ export interface IntegrationDetail {
 }
 
 export async function listIntegrationCatalog(
-  search?: string
+  search?: string,
+  limit = 200,
+  offset = 0
 ): Promise<IntegrationSummary[]> {
-  const q = search?.trim()
-    ? `?search=${encodeURIComponent(search.trim())}&limit=200`
-    : "?limit=200";
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  if (search?.trim()) {
+    params.set("search", search.trim());
+  }
+  const q = `?${params.toString()}`;
   const res = await fetch(`${API_BASE}/integrations${q}`);
   return parseJson<IntegrationSummary[]>(res);
 }

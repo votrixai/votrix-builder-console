@@ -680,20 +680,8 @@ export default function TreeView({
     x: number;
     y: number;
   } | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
-    // Start with all folders expanded
-    const collectFolderIds = (items: TreeViewItem[]): string[] => {
-      const ids: string[] = [];
-      for (const item of items) {
-        if (item.children) {
-          ids.push(item.id);
-          ids.push(...collectFolderIds(item.children));
-        }
-      }
-      return ids;
-    };
-    return new Set(collectFolderIds(data));
-  });
+  // Keep folders collapsed by default; only user actions control expansion.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [isDragging, setIsDragging] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -703,23 +691,26 @@ export default function TreeView({
 
   const DRAG_THRESHOLD = 10; // pixels
 
-  // Expand any new folders when data changes
+  // Preserve current expanded/collapsed state when data changes.
+  // Only remove ids that no longer exist in the latest tree.
   useEffect(() => {
-    const collectFolderIds = (items: TreeViewItem[]): string[] => {
+    const collectFolderIds = (items: TreeViewItem[]): Set<string> => {
       const ids: string[] = [];
       for (const item of items) {
         if (item.children) {
           ids.push(item.id);
-          ids.push(...collectFolderIds(item.children));
+          ids.push(...Array.from(collectFolderIds(item.children)));
         }
       }
-      return ids;
+      return new Set(ids);
     };
-    const allFolderIds = collectFolderIds(data);
+    const validFolderIds = collectFolderIds(data);
     setExpandedIds((prev) => {
-      const next = new Set(prev);
-      for (const id of allFolderIds) {
-        next.add(id);
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (validFolderIds.has(id)) {
+          next.add(id);
+        }
       }
       return next;
     });

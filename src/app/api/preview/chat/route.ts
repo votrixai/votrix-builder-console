@@ -25,6 +25,9 @@ export async function POST(req: NextRequest) {
   const messages = body.messages as UIMessage[] | undefined;
   const messageFromClient =
     typeof body.message === "string" ? body.message.trim() : "";
+  const images = Array.isArray(body.images)
+    ? (body.images as unknown[]).filter((u): u is string => typeof u === "string")
+    : [];
 
   if (!agentId || !userId || !sessionId) {
     return new Response(
@@ -55,6 +58,7 @@ export async function POST(req: NextRequest) {
         user_id: userId,
         session_id: sessionId,
         message,
+        images,
       }),
       signal: req.signal,
     });

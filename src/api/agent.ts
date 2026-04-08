@@ -135,9 +135,13 @@ export async function bulkDelete(agentId: string, paths: string[]): Promise<void
   if (blocked.length > 0) {
     throw new Error("Cannot delete a protected folder.");
   }
-  await fetch(`${API_BASE}/agents/${agentId}/files/bulk-delete`, {
+  const res = await fetch(`${API_BASE}/agents/${agentId}/files/bulk-delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paths, recursive: true }),
   });
+  if (!res.ok) {
+    const message = await res.text().catch(() => "");
+    throw new Error(message || `Delete failed with status ${res.status}`);
+  }
 }

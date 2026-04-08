@@ -9,7 +9,7 @@ import {
   type UIMessage,
 } from "ai";
 import { extractLastUserText } from "@/lib/extract-last-user-text";
-import { ChevronRight, Loader2, PlusCircle, SendHorizontal, Wrench } from "lucide-react";
+import { ChevronRight, ImagePlus, Loader2, PlusCircle, SendHorizontal, Wrench, X } from "lucide-react";
 import { useAgentId } from "@/contexts/agent-id-context";
 import {
   loadStoredUserIdInput,
@@ -270,6 +270,7 @@ function PreviewChatSession({
   showTrace,
 }: PreviewChatSessionProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const pendingImagesRef = useRef<string[]>([]);
 
   const transport = useMemo(
     () =>
@@ -284,6 +285,7 @@ function PreviewChatSession({
             trigger,
             messageId,
             message: extractLastUserText(messages) ?? "",
+            images: pendingImagesRef.current,
           },
         }),
       }),
@@ -297,7 +299,34 @@ function PreviewChatSession({
   });
 
   const [input, setInput] = useState("");
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = status === "streaming" || status === "submitted";
+
+  const onPickImage = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("user_id", userId);
+      const res = await fetch(`/api/preview/upload?agent_id=${encodeURIComponent(agentId)}`, {
+        method: "POST",
+        body: form,
+      });
+      const json = await res.json() as { public_url?: string; error?: string };
+      if (!res.ok || !json.public_url) throw new Error(json.error ?? "Upload failed");
+      setAttachedImages((prev) => [...prev, json.public_url!]);
+    } catch (err) {
+      console.error("Image upload failed:", err);
+    } finally {
+      setUploading(false);
+    }
+  }, [agentId, userId]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -308,11 +337,13 @@ function PreviewChatSession({
     async (e: React.FormEvent) => {
       e.preventDefault();
       const text = input.trim();
-      if (!text || busy || !agentId.trim() || !sessionId) return;
+      if ((!text && attachedImages.length === 0) || busy || !agentId.trim() || !sessionId) return;
+      pendingImagesRef.current = [...attachedImages];
       setInput("");
-      await sendMessage({ text });
+      setAttachedImages([]);
+      await sendMessage({ text: text || " " });
     },
-    [input, busy, agentId, sessionId, sendMessage]
+    [input, attachedImages, busy, agentId, sessionId, sendMessage]
   );
 
   return (
@@ -348,39 +379,87 @@ function PreviewChatSession({
           onSubmit={onSubmit}
           className="absolute inset-x-0 bottom-0 border-t border-slate-200/80 bg-white/95 p-4 backdrop-blur"
         >
-          <div className="mx-auto flex max-w-3xl gap-2">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void onSubmit(e);
-                }
-              }}
-              placeholder="Message the agent…"
-              rows={2}
-              disabled={busy}
-              className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-inner outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
-            />
-            {busy ? (
+          <div className="mx-auto flex max-w-3xl flex-col gap-2">
+            {/* Image thumbnails */}
+            {attachedImages.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachedImages.map((url, i) => (
+                  <div key={url} className="relative h-16 w-16 shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`attachment-${i}`}
+                      className="h-full w-full rounded-lg border border-slate-200 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAttachedImages((prev) => prev.filter((_, j) => j !== i))}
+                      className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-slate-700 text-white hover:bg-slate-900"
+                      aria-label="Remove image"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void onPickImage(e)}
+              />
+              {/* Image attach button */}
               <button
                 type="button"
-                onClick={() => stop()}
-                className="shrink-0 self-end rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy || uploading}
+                className="shrink-0 self-end rounded-xl border border-slate-200 bg-white p-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40"
+                aria-label="Attach image"
               >
-                Stop
+                {uploading
+                  ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                  : <ImagePlus className="h-5 w-5" aria-hidden />
+                }
               </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                className="flex shrink-0 items-center justify-center self-end rounded-xl bg-slate-900 px-4 py-2.5 text-white hover:bg-slate-800 disabled:opacity-40"
-                aria-label="Send"
-              >
-                <SendHorizontal className="h-5 w-5" aria-hidden />
-              </button>
-            )}
+
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void onSubmit(e);
+                  }
+                }}
+                placeholder="Message the agent…"
+                rows={2}
+                disabled={busy}
+                className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-inner outline-none placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
+              />
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={() => stop()}
+                  className="shrink-0 self-end rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim() && attachedImages.length === 0}
+                  className="flex shrink-0 items-center justify-center self-end rounded-xl bg-slate-900 px-4 py-2.5 text-white hover:bg-slate-800 disabled:opacity-40"
+                  aria-label="Send"
+                >
+                  <SendHorizontal className="h-5 w-5" aria-hidden />
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>

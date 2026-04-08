@@ -50,8 +50,20 @@ export default function IntegrationsPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerResults, setPickerResults] = useState<IntegrationSummary[]>([]);
+  const [pickerOffset, setPickerOffset] = useState(0);
+  const [pickerHasMore, setPickerHasMore] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerLoadingMore, setPickerLoadingMore] = useState(false);
   const [attachingSlug, setAttachingSlug] = useState<string | null>(null);
   const attachGenRef = useRef(0);
+  const pickerReqRef = useRef(0);
+  const pickerOffsetRef = useRef(0);
+  const PICKER_PAGE_SIZE = 50;
+
+  useEffect(() => {
+    pickerOffsetRef.current = pickerOffset;
+  }, [pickerOffset]);
 
   const loadCatalog = useCallback(async () => {
     setLoadingCatalog(true);
@@ -193,18 +205,45 @@ export default function IntegrationsPage() {
     agentDetail && orgId.trim() && agentDetail.org_id !== orgId.trim()
   );
 
-  const pickerItems = useMemo(() => {
-    const q = pickerSearch.trim().toLowerCase();
-    let list = catalog.filter((c) => !orgSlugSet.has(c.slug));
-    if (q) {
-      list = list.filter(
-        (c) =>
-          c.slug.toLowerCase().includes(q) ||
-          c.display_name.toLowerCase().includes(q)
-      );
-    }
-    return list.slice(0, 80);
-  }, [catalog, orgSlugSet, pickerSearch]);
+  const pickerItems = useMemo(
+    () => pickerResults.filter((c) => !orgSlugSet.has(c.slug)),
+    [pickerResults, orgSlugSet]
+  );
+
+  const loadPickerPage = useCallback(
+    async (opts: { reset: boolean }) => {
+      const reqId = ++pickerReqRef.current;
+      const search = pickerSearch.trim();
+      const offset = opts.reset ? 0 : pickerOffsetRef.current;
+      if (opts.reset) setPickerLoading(true);
+      else setPickerLoadingMore(true);
+      try {
+        const page = await listIntegrationCatalog(search, PICKER_PAGE_SIZE, offset);
+        if (reqId !== pickerReqRef.current) return;
+        setPickerResults((prev) => (opts.reset ? page : [...prev, ...page]));
+        setPickerOffset(offset + page.length);
+        setPickerHasMore(page.length === PICKER_PAGE_SIZE);
+      } catch (e) {
+        if (reqId !== pickerReqRef.current) return;
+        setError(
+          e instanceof Error ? e.message : "Failed to load integration catalog"
+        );
+      } finally {
+        if (reqId !== pickerReqRef.current) return;
+        setPickerLoading(false);
+        setPickerLoadingMore(false);
+      }
+    },
+    [pickerSearch]
+  );
+
+  useEffect(() => {
+    if (!addOpen) return;
+    const timer = setTimeout(() => {
+      void loadPickerPage({ reset: true });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [addOpen, pickerSearch, loadPickerPage]);
 
   async function addSlugToOrg(slug: string) {
     if (!orgId.trim() || orgSlugSet.has(slug)) return;
@@ -216,8 +255,7 @@ export default function IntegrationsPage() {
         enabled_integration_slugs: next,
       });
       setOrgDetail(updated);
-      setAddOpen(false);
-      setPickerSearch("");
+      void loadPickerPage({ reset: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add integration");
     } finally {
@@ -689,6 +727,9 @@ export default function IntegrationsPage() {
           onClick={() => {
             setAddOpen(false);
             setPickerSearch("");
+            setPickerResults([]);
+            setPickerOffset(0);
+            setPickerHasMore(false);
           }}
         >
           <div
@@ -704,6 +745,9 @@ export default function IntegrationsPage() {
                 onClick={() => {
                   setAddOpen(false);
                   setPickerSearch("");
+                  setPickerResults([]);
+                  setPickerOffset(0);
+                  setPickerHasMore(false);
                 }}
                 className="rounded p-1 text-gray-400 hover:bg-gray-100"
                 aria-label="Close"
@@ -721,7 +765,7 @@ export default function IntegrationsPage() {
               />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {loadingCatalog ? (
+              {pickerLoading || loadingCatalog ? (
                 <div className="flex justify-center py-12 text-gray-400">
                   <Loader2 className="h-8 w-8 animate-spin" />
                 </div>
@@ -749,6 +793,25 @@ export default function IntegrationsPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {!pickerLoading && pickerItems.length > 0 && pickerHasMore && (
+                <div className="pt-3 text-center">
+                  <button
+                    type="button"
+                    disabled={savingOrg || pickerLoadingMore}
+                    onClick={() => void loadPickerPage({ reset: false })}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {pickerLoadingMore ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      "Load more"
+                    )}
+                  </button>
+                </div>
               )}
             </div>
           </div>

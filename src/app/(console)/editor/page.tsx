@@ -70,7 +70,7 @@ interface OpenTab {
 
 export default function EditorPage() {
   const { agentId } = useAgentId();
-  const { fileTree, fileContents, setFileContents, loading, reload } =
+  const { fileTree, fileContents, setFileContents, removePaths, loading, reload } =
     useEditorFiles();
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<string>("");
@@ -87,6 +87,33 @@ export default function EditorPage() {
   const [uploading, setUploading] = useState(false);
   const dragCounterRef = useRef(0);
   const [protectedNotice, setProtectedNotice] = useState(false);
+  const [mutationCount, setMutationCount] = useState(0);
+  const [mutationMessage, setMutationMessage] = useState<string>("Updating...");
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const errorToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showErrorToast = useCallback((message: string) => {
+    setErrorToast(message);
+    if (errorToastTimerRef.current) clearTimeout(errorToastTimerRef.current);
+    errorToastTimerRef.current = setTimeout(() => setErrorToast(null), 2500);
+  }, []);
+
+  const runWithMutation = useCallback(
+    async <T,>(message: string, task: () => Promise<T>): Promise<T> => {
+      setMutationMessage(message);
+      setMutationCount((prev) => prev + 1);
+      try {
+        return await task();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Operation failed";
+        showErrorToast(msg);
+        throw err;
+      } finally {
+        setMutationCount((prev) => Math.max(0, prev - 1));
+      }
+    },
+    [showErrorToast]
+  );
 
   const saveFile = useCallback(async (path: string, content: string) => {
     if (!agentId.trim()) return;
@@ -124,6 +151,7 @@ export default function EditorPage() {
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (errorToastTimerRef.current) clearTimeout(errorToastTimerRef.current);
     };
   }, []);
 
@@ -244,25 +272,27 @@ export default function EditorPage() {
 
       setUploading(true);
       try {
-        const allFiles: { path: string; file: File | null }[] = [];
-        const base = targetFolder;
-        for (const entry of entries) {
-          allFiles.push(...(await collectEntries(entry, base)));
-        }
+        await runWithMutation("Uploading and applying changes...", async () => {
+          const allFiles: { path: string; file: File | null }[] = [];
+          const base = targetFolder;
+          for (const entry of entries) {
+            allFiles.push(...(await collectEntries(entry, base)));
+          }
 
-        // Create directories first, then upload files
-        const dirs = allFiles.filter((f) => f.file === null);
-        const files = allFiles.filter((f) => f.file !== null);
+          // Create directories first, then upload files
+          const dirs = allFiles.filter((f) => f.file === null);
+          const files = allFiles.filter((f) => f.file !== null);
 
-        for (const dir of dirs) {
-          await createDirectory(agentId, dir.path);
-        }
-        for (const f of files) {
-          const content = await f.file!.text();
-          await apiSaveFile(agentId, f.path, content);
-        }
+          for (const dir of dirs) {
+            await createDirectory(agentId, dir.path);
+          }
+          for (const f of files) {
+            const content = await f.file!.text();
+            await apiSaveFile(agentId, f.path, content);
+          }
 
-        await reload();
+          await reload();
+        });
       } catch (err) {
         console.error("Failed to upload dropped files:", err);
       } finally {
@@ -440,20 +470,22 @@ export default function EditorPage() {
         const destFolder = target.type === "folder"
           ? target.id
           : target.id.substring(0, target.id.lastIndexOf("/"));
-        if (clip.cut) {
-          const moves = clip.paths.map((p) => {
-            const name = p.split("/").pop()!;
-            return { old_path: p, new_path: `${destFolder}/${name}` };
-          });
-          await bulkMove(agentId, moves);
-          clipboardRef.current = null;
-        } else {
-          for (const p of clip.paths) {
-            const name = p.split("/").pop()!;
-            await copyFile(agentId, p, `${destFolder}/${name}`);
+        await runWithMutation("Updating file structure...", async () => {
+          if (clip.cut) {
+            const moves = clip.paths.map((p) => {
+              const name = p.split("/").pop()!;
+              return { old_path: p, new_path: `${destFolder}/${name}` };
+            });
+            await bulkMove(agentId, moves);
+            clipboardRef.current = null;
+          } else {
+            for (const p of clip.paths) {
+              const name = p.split("/").pop()!;
+              await copyFile(agentId, p, `${destFolder}/${name}`);
+            }
           }
-        }
-        await reload();
+          await reload();
+        });
       },
     },
     {
@@ -512,11 +544,13 @@ export default function EditorPage() {
         return;
       }
       const path = `${ghostNode.parentId}/${newName}`;
-      if (ghostNode.type === "file") {
-        await apiSaveFile(agentId, path, "");
-      } else {
-        await createDirectory(agentId, path);
-      }
+      await runWithMutation("Creating...", async () => {
+        if (ghostNode.type === "file") {
+          await apiSaveFile(agentId, path, "");
+        } else {
+          await createDirectory(agentId, path);
+        }
+      });
       setGhostNode(null);
       setEditingId(null);
       await reload();
@@ -528,7 +562,9 @@ export default function EditorPage() {
       }
       const parentPath = id.substring(0, id.lastIndexOf("/"));
       const newPath = `${parentPath}/${newName}`;
-      await moveFile(agentId, id, newPath);
+      await runWithMutation("Renaming...", async () => {
+        await moveFile(agentId, id, newPath);
+      });
       setOpenTabs((prev) =>
         prev.map((t) =>
           t.id === id ? { ...t, id: newPath, name: newName } : t
@@ -556,7 +592,9 @@ export default function EditorPage() {
 
   const handleMoveConfirm = async () => {
     if (!pendingMove) return;
-    await moveFile(agentId, pendingMove.oldPath, pendingMove.newPath);
+    await runWithMutation("Moving files...", async () => {
+      await moveFile(agentId, pendingMove.oldPath, pendingMove.newPath);
+    });
     setPendingMove(null);
     await reload();
   };
@@ -564,10 +602,12 @@ export default function EditorPage() {
   const handleDeleteConfirm = async () => {
     if (!pendingDelete) return;
     const { paths } = pendingDelete;
-    await bulkDelete(agentId, paths);
+    await runWithMutation("Deleting...", async () => {
+      await bulkDelete(agentId, paths);
+    });
     setOpenTabs((prev) => prev.filter((t) => !paths.some((p) => t.id === p || t.id.startsWith(p + "/"))));
     setPendingDelete(null);
-    await reload();
+    removePaths(paths);
   };
 
   return (
@@ -620,8 +660,10 @@ export default function EditorPage() {
                     setPendingMove({ oldPath: dragged.id, newPath, name: dragged.name });
                     return;
                   }
-                  await moveFile(agentId, dragged.id, newPath);
-                  await reload();
+                  await runWithMutation("Moving files...", async () => {
+                    await moveFile(agentId, dragged.id, newPath);
+                    await reload();
+                  });
                 }}
               />
             )}
@@ -887,6 +929,23 @@ export default function EditorPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {(loading || mutationCount > 0 || errorToast) && (
+        <div className="fixed right-4 top-4 z-[70] flex max-w-sm flex-col gap-2">
+          {(loading || mutationCount > 0) && (
+            <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 shadow">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{loading ? "Loading files..." : mutationMessage}</span>
+            </div>
+          )}
+          {errorToast && (
+            <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 shadow">
+              <ShieldAlert className="h-4 w-4 shrink-0" />
+              <span className="line-clamp-2">{errorToast}</span>
+            </div>
+          )}
         </div>
       )}
     </div>

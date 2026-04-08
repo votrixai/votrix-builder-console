@@ -19,6 +19,7 @@ type EditorFilesContextValue = {
   setFileContents: React.Dispatch<
     React.SetStateAction<Record<string, string>>
   >;
+  removePaths: (paths: string[]) => void;
   loading: boolean;
   reload: () => Promise<void>;
 };
@@ -32,6 +33,28 @@ export function EditorFilesProvider({ children }: { children: React.ReactNode })
   const [fileTree, setFileTree] = useState<TreeViewItem[]>([]);
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+
+  const removePaths = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+
+    const shouldRemove = (id: string) =>
+      paths.some((path) => id === path || id.startsWith(path + "/"));
+
+    const pruneTree = (items: TreeViewItem[]): TreeViewItem[] =>
+      items
+        .filter((item) => !shouldRemove(item.id))
+        .map((item) => ({
+          ...item,
+          children: item.children ? pruneTree(item.children) : undefined,
+        }));
+
+    setFileTree((prev) => pruneTree(prev));
+    setFileContents((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([id]) => !shouldRemove(id))
+      )
+    );
+  }, []);
 
   const reload = useCallback(async () => {
     if (!agentId.trim()) return;
@@ -61,10 +84,11 @@ export function EditorFilesProvider({ children }: { children: React.ReactNode })
       fileTree,
       fileContents,
       setFileContents,
+      removePaths,
       loading,
       reload,
     }),
-    [fileTree, fileContents, loading, reload]
+    [fileTree, fileContents, loading, reload, removePaths]
   );
 
   return (
