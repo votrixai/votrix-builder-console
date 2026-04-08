@@ -171,3 +171,15 @@ export async function patchAgentIntegrations(
   });
   return parseJson<AgentDetail>(res);
 }
+
+export async function patchAgentMeta(
+  agentId: string,
+  body: { display_name?: string; model?: string }
+): Promise<AgentDetail> {
+  const res = await fetch(`${API_BASE}/agents/${agentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parseJson<AgentDetail>(res);
+}

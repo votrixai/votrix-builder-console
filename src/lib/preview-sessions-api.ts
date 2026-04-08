@@ -53,6 +53,28 @@ export async function createAgentSession(
   return JSON.parse(text) as SessionSummary;
 }
 
+/**
+ * Ensure the user is linked to the agent and their virtual filesystem is populated.
+ * Idempotent — safe to call every time before loading sessions.
+ */
+export async function ensureUserAgentLink(
+  userId: string,
+  agentId: string
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/users/${encodeURIComponent(userId)}/agents`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blueprint_agent_id: agentId }),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+}
+
 /** Prefer newest open session; else newest overall (list is created_at desc). */
 export function pickDefaultSession(
   sessions: SessionSummary[]

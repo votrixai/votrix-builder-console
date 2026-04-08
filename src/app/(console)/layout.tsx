@@ -3,6 +3,7 @@
 import { AgentIdProvider } from "@/contexts/agent-id-context";
 import { OrgIdProvider } from "@/contexts/org-id-context";
 import { EditorFilesProvider } from "@/contexts/editor-files-context";
+import { PreviewStateProvider } from "@/contexts/preview-state-context";
 import { ConsoleChrome } from "@/components/console/console-chrome";
 
 export default function ConsoleLayout({
@@ -14,12 +15,14 @@ export default function ConsoleLayout({
     <AgentIdProvider>
       <OrgIdProvider>
         <EditorFilesProvider>
-          <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
-            <ConsoleChrome />
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              {children}
+          <PreviewStateProvider>
+            <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
+              <ConsoleChrome />
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {children}
+              </div>
             </div>
-          </div>
+          </PreviewStateProvider>
         </EditorFilesProvider>
       </OrgIdProvider>
     </AgentIdProvider>

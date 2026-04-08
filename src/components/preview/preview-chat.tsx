@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePreviewState } from "@/contexts/preview-state-context";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/preview-chat-identity";
 import {
   createAgentSession,
+  ensureUserAgentLink,
   listAgentSessionsForUser,
   pickDefaultSession,
   type SessionSummary,
@@ -488,22 +490,59 @@ function sessionLabel(s: SessionSummary): string {
 
 export function PreviewChat() {
   const { agentId } = useAgentId();
+  const { getState, setState: saveToContext } = usePreviewState();
+
+  // All state starts with SSR-safe defaults. Context/localStorage restoration
+  // happens exclusively in useEffect (client-only) to avoid hydration mismatches.
   const [userIdInput, setUserIdInput] = useState("");
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [showTrace, setShowTrace] = useState(false);
+
+  // Transient UI state — always starts fresh.
   const [bootMessages, setBootMessages] = useState<UIMessage[] | null>(null);
   const [bootSeq, setBootSeq] = useState(0);
   const [connecting, setConnecting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [showTrace, setShowTrace] = useState(false);
 
+  // Track restored session so the auto-load effect can use it without re-running.
+  const restoredSessionRef = useRef<{ uid: string | null; sid: string | null }>({
+    uid: null,
+    sid: null,
+  });
+
+  // On mount: restore from context (same agent) or fall back to localStorage.
+  // useEffect is client-only — keeps SSR output identical and avoids hydration mismatches.
   useEffect(() => {
-    setUserIdInput(loadStoredUserIdInput());
+    const saved = getState();
+    const r = saved?.agentId === agentId ? saved : null;
+    if (r) {
+      setUserIdInput(r.userIdInput);
+      setActiveUserId(r.activeUserId);
+      setSessionList(r.sessionList);
+      setActiveSessionId(r.activeSessionId);
+      setShowTrace(r.showTrace);
+      restoredSessionRef.current = { uid: r.activeUserId, sid: r.activeSessionId };
+    } else {
+      setUserIdInput(loadStoredUserIdInput());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Sync persisted state back to context on every change.
   useEffect(() => {
+    saveToContext({ agentId, userIdInput, activeUserId, activeSessionId, sessionList, showTrace });
+  }, [agentId, userIdInput, activeUserId, activeSessionId, sessionList, showTrace, saveToContext]);
+
+  // Reset when the selected agent changes — skip on initial mount so restored state survives.
+  const agentChangedRef = useRef(false);
+  useEffect(() => {
+    if (!agentChangedRef.current) {
+      agentChangedRef.current = true;
+      return;
+    }
     setActiveUserId(null);
     setActiveSessionId(null);
     setSessionList([]);
@@ -525,12 +564,19 @@ export function PreviewChat() {
     }
   }, []);
 
+  // Auto-load messages when we restored a session from context.
+  useEffect(() => {
+    const { uid, sid } = restoredSessionRef.current;
+    if (uid && sid) void loadMessagesForSession(sid);
+  }, [loadMessagesForSession]);
+
   const connect = useCallback(async () => {
     const uid = userIdInput.trim();
     if (!uid || !agentId.trim()) return;
     setConnecting(true);
     setConnectError(null);
     try {
+      await ensureUserAgentLink(uid, agentId);
       const listRes = await listAgentSessionsForUser(agentId, uid);
       let sessions = [...listRes.sessions];
       let sid: string;
