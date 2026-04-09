@@ -24,6 +24,131 @@ import {
   type SessionSummary,
 } from "@/lib/preview-sessions-api";
 import { fetchSessionUiMessages } from "@/lib/session-to-ui-messages";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+const remarkPlugins = [remarkGfm];
+
+function chatMarkdownComponents(
+  variant: "assistant" | "user"
+): Partial<Components> {
+  const isUser = variant === "user";
+  const link =
+    isUser
+      ? "font-medium text-sky-300 underline underline-offset-2 hover:text-sky-200"
+      : "font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700";
+  const strong = isUser ? "font-semibold text-white" : "font-semibold text-slate-900";
+  const inlineCode = isUser
+    ? "rounded bg-white/15 px-1 py-0.5 font-mono text-[0.875em] text-sky-100"
+    : "rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.875em] text-slate-800";
+  const preBox = isUser
+    ? "my-2 overflow-x-auto rounded-lg border border-white/15 bg-black/25 p-3 font-mono text-xs text-slate-100"
+    : "my-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800";
+  const hr = isUser ? "my-3 border-white/20" : "my-3 border-slate-200";
+  const blockquote = isUser
+    ? "my-2 border-l-2 border-white/30 pl-3 text-slate-200"
+    : "my-2 border-l-2 border-slate-300 pl-3 text-slate-600";
+  const thTd = isUser ? "border border-white/20 px-2 py-1" : "border border-slate-200 px-2 py-1";
+
+  return {
+    p: ({ children }) => (
+      <p className="mb-2 last:mb-0 leading-relaxed break-words">{children}</p>
+    ),
+    h1: ({ children }) => (
+      <h1 className="mb-2 mt-3 text-base font-semibold first:mt-0">{children}</h1>
+    ),
+    h2: ({ children }) => (
+      <h2 className="mb-2 mt-3 text-[15px] font-semibold first:mt-0">{children}</h2>
+    ),
+    h3: ({ children }) => (
+      <h3 className="mb-1.5 mt-2 text-sm font-semibold first:mt-0">{children}</h3>
+    ),
+    ul: ({ children }) => (
+      <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>
+    ),
+    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+    blockquote: ({ children }) => (
+      <blockquote className={blockquote}>{children}</blockquote>
+    ),
+    hr: () => <hr className={hr} />,
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={link}
+      >
+        {children}
+      </a>
+    ),
+    strong: ({ children }) => <strong className={strong}>{children}</strong>,
+    em: ({ children }) => <em className="italic">{children}</em>,
+    code: ({ className, children, ...props }) => {
+      if (!className) {
+        return (
+          <code className={inlineCode} {...props}>
+            {children}
+          </code>
+        );
+      }
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+    pre: ({ children }) => <pre className={preBox}>{children}</pre>,
+    img: ({ src, alt }) => (
+      /* eslint-disable-next-line @next/next/no-img-element -- model URLs; dynamic remote hosts */
+      <img
+        src={src}
+        alt={alt ?? ""}
+        className="my-2 max-h-72 max-w-full rounded-lg object-contain"
+        loading="lazy"
+      />
+    ),
+    table: ({ children }) => (
+      <div className="my-2 max-w-full overflow-x-auto">
+        <table className="w-full border-collapse text-left text-sm">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead>{children}</thead>,
+    tbody: ({ children }) => <tbody>{children}</tbody>,
+    tr: ({ children }) => <tr>{children}</tr>,
+    th: ({ children }) => (
+      <th
+        className={`${thTd} font-semibold ${
+          isUser ? "bg-white/10" : "bg-slate-100"
+        }`}
+      >
+        {children}
+      </th>
+    ),
+    td: ({ children }) => <td className={thTd}>{children}</td>,
+  };
+}
+
+function ChatMarkdown({
+  text,
+  variant,
+}: {
+  text: string;
+  variant: "assistant" | "user";
+}) {
+  return (
+    <div className="min-w-0">
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        components={chatMarkdownComponents(variant)}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 /** Shared look for toolbar inputs / selects. */
 const previewToolbarControl =
@@ -223,11 +348,9 @@ function MessageBubble({ message }: { message: UIMessage }) {
   if (isUser) {
     return (
       <div className="flex w-full justify-end">
-        <div className="max-w-[min(100%,42rem)] rounded-2xl bg-slate-900 px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm">
+        <div className="max-w-[min(100%,42rem)] space-y-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm">
           {textParts.map((part, i) => (
-            <p key={i} className="whitespace-pre-wrap break-words">
-              {part.text}
-            </p>
+            <ChatMarkdown key={i} text={part.text} variant="user" />
           ))}
         </div>
       </div>
@@ -240,11 +363,9 @@ function MessageBubble({ message }: { message: UIMessage }) {
         <AssistantToolCard key={toolPartCallId(part) ?? `tool-${i}`} part={part} />
       ))}
       {textParts.length > 0 && (
-        <div className="max-w-[min(100%,42rem)] rounded-2xl border border-slate-200/80 bg-white px-4 py-2.5 text-sm leading-relaxed text-slate-800 shadow-sm">
+        <div className="max-w-[min(100%,42rem)] space-y-2 rounded-2xl border border-slate-200/80 bg-white px-4 py-2.5 text-sm leading-relaxed text-slate-800 shadow-sm">
           {textParts.map((part, i) => (
-            <p key={i} className="whitespace-pre-wrap break-words">
-              {part.text}
-            </p>
+            <ChatMarkdown key={i} text={part.text} variant="assistant" />
           ))}
         </div>
       )}
