@@ -10,16 +10,16 @@ import {
   type UIMessage,
 } from "ai";
 import { extractLastUserText } from "@/lib/extract-last-user-text";
-import { ChevronRight, ImagePlus, Loader2, PlusCircle, SendHorizontal, Wrench, X } from "lucide-react";
+import { ChevronRight, ImagePlus, Loader2, SendHorizontal, Wrench, X } from "lucide-react";
 import { useAgentId } from "@/contexts/agent-id-context";
 import {
   loadStoredUserIdInput,
   saveStoredUserIdInput,
+  isUUID,
 } from "@/lib/preview-chat-identity";
 import {
-  createAgentSession,
-  ensureUserAgentLink,
-  listAgentSessionsForUser,
+  createSession,
+  listUserSessions,
   pickDefaultSession,
   type SessionSummary,
 } from "@/lib/preview-sessions-api";
@@ -604,9 +604,8 @@ function PreviewChatSession({
 // ---------------------------------------------------------------------------
 
 function sessionLabel(s: SessionSummary): string {
-  const short = s.id.length > 14 ? `${s.id.slice(0, 12)}…` : s.id;
-  const ended = s.ended_at ? " (ended)" : "";
-  return `${short} · ${s.event_count} events${ended}`;
+  const date = new Date(s.created_at).toLocaleDateString();
+  return `${s.display_name} · ${date}`;
 }
 
 export function PreviewChat() {
@@ -691,29 +690,28 @@ export function PreviewChat() {
     if (uid && sid) void loadMessagesForSession(sid);
   }, [loadMessagesForSession]);
 
-  const connect = useCallback(async () => {
+  const loadSessions = useCallback(async () => {
     const uid = userIdInput.trim();
     if (!uid || !agentId.trim()) return;
+    if (!isUUID(uid)) {
+      setConnectError("User ID must be a valid UUID.");
+      return;
+    }
     setConnecting(true);
     setConnectError(null);
     try {
-      await ensureUserAgentLink(uid, agentId);
-      const listRes = await listAgentSessionsForUser(agentId, uid);
-      let sessions = [...listRes.sessions];
-      let sid: string;
-      if (sessions.length === 0) {
-        const created = await createAgentSession(agentId, uid);
-        sessions = [created];
-        sid = created.id;
-      } else {
-        const pick = pickDefaultSession(sessions);
-        sid = pick!.id;
-      }
+      const sessions = await listUserSessions(uid);
       saveStoredUserIdInput(uid);
       setActiveUserId(uid);
       setSessionList(sessions);
-      setActiveSessionId(sid);
-      await loadMessagesForSession(sid);
+      if (sessions.length > 0) {
+        const sid = pickDefaultSession(sessions)!.id;
+        setActiveSessionId(sid);
+        await loadMessagesForSession(sid);
+      } else {
+        setActiveSessionId(null);
+        setBootMessages(null);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setConnectError(msg);
@@ -726,6 +724,30 @@ export function PreviewChat() {
     }
   }, [agentId, userIdInput, loadMessagesForSession]);
 
+  const createNewSession = useCallback(async () => {
+    const uid = userIdInput.trim();
+    if (!uid || !agentId.trim()) return;
+    if (!isUUID(uid)) {
+      setConnectError("User ID must be a valid UUID.");
+      return;
+    }
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const created = await createSession(uid, agentId);
+      saveStoredUserIdInput(uid);
+      setActiveUserId(uid);
+      setSessionList((prev) => [created, ...prev]);
+      setActiveSessionId(created.id);
+      setBootMessages([]);
+      setBootSeq((s) => s + 1);
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnecting(false);
+    }
+  }, [agentId, userIdInput]);
+
   const onSessionSelect = useCallback(
     async (e: React.ChangeEvent<HTMLSelectElement>) => {
       const id = e.target.value;
@@ -736,22 +758,6 @@ export function PreviewChat() {
     [activeSessionId, loadMessagesForSession]
   );
 
-  const newSession = useCallback(async () => {
-    if (!activeUserId || !agentId.trim()) return;
-    setConnecting(true);
-    setConnectError(null);
-    try {
-      const created = await createAgentSession(agentId, activeUserId);
-      setSessionList((prev) => [created, ...prev]);
-      setActiveSessionId(created.id);
-      setBootMessages([]);
-      setBootSeq((s) => s + 1);
-    } catch (e) {
-      setConnectError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setConnecting(false);
-    }
-  }, [activeUserId, agentId]);
 
   if (!agentId.trim()) {
     return (
@@ -779,9 +785,9 @@ export function PreviewChat() {
             />
             <button
               type="button"
-              onClick={() => void connect()}
+              onClick={() => void loadSessions()}
               disabled={connecting || !userIdInput.trim()}
-              className="shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+              className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
             >
               {connecting ? (
                 <span className="inline-flex items-center gap-1">
@@ -792,8 +798,16 @@ export function PreviewChat() {
                 "Load sessions"
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => void createNewSession()}
+              disabled={connecting || !userIdInput.trim()}
+              className="shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+            >
+              Create session
+            </button>
 
-            {activeUserId && (
+            {activeUserId && sessionList.length > 0 && (
               <>
                 <span className="ml-1 hidden h-4 w-px shrink-0 bg-slate-200 sm:block" aria-hidden />
                 <span className="shrink-0 text-xs font-medium text-slate-600">Session</span>
@@ -810,15 +824,6 @@ export function PreviewChat() {
                     </option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => void newSession()}
-                  disabled={connecting}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  <PlusCircle className="h-3.5 w-3.5" aria-hidden />
-                  New session
-                </button>
               </>
             )}
 

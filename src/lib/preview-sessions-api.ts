@@ -1,86 +1,48 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE!;
 
+/** Create a backend user with a display name; returns the UUID. */
+export async function createUser(displayName: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+  return (JSON.parse(text) as { id: string }).id;
+}
+
 export interface SessionSummary {
   id: string;
-  agent_id: string;
   user_id: string;
-  started_at: string;
-  ended_at: string | null;
-  event_count: number;
+  display_name: string;
+  created_at: string;
 }
 
-export interface SessionListResponse {
-  sessions: SessionSummary[];
-  total: number;
-  page_offset: number;
-  page_size: number;
+/** Lists all sessions for a user. */
+export async function listUserSessions(userId: string): Promise<SessionSummary[]> {
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/sessions`);
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+  return JSON.parse(text) as SessionSummary[];
 }
 
-/** Lists sessions for a blueprint agent; pass `userId` to restrict to one end user. */
-export async function listAgentSessionsForUser(
-  agentId: string,
+/** Create a new session for a user + agent. */
+export async function createSession(
   userId: string,
-  pageSize = 50
-): Promise<SessionListResponse> {
-  const url = new URL(`${API_BASE}/agents/${encodeURIComponent(agentId)}/sessions`);
-  url.searchParams.set("user_id", userId);
-  url.searchParams.set("page_size", String(pageSize));
-  const res = await fetch(url.toString());
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-  return JSON.parse(text) as SessionListResponse;
-}
-
-/** Server generates and returns the new session id. */
-export async function createAgentSession(
-  agentId: string,
-  userId: string
+  agentId: string
 ): Promise<SessionSummary> {
-  const res = await fetch(
-    `${API_BASE}/agents/${encodeURIComponent(agentId)}/sessions`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    }
-  );
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, display_name: "New session" }),
+  });
   const text = await res.text();
-  if (!res.ok) {
-    throw new Error(text || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
   return JSON.parse(text) as SessionSummary;
 }
 
-/**
- * Ensure the user is linked to the agent and their virtual filesystem is populated.
- * Idempotent — safe to call every time before loading sessions.
- */
-export async function ensureUserAgentLink(
-  userId: string,
-  agentId: string
-): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/users/${encodeURIComponent(userId)}/agents`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blueprint_agent_id: agentId }),
-    }
-  );
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-}
-
-/** Prefer newest open session; else newest overall (list is created_at desc). */
-export function pickDefaultSession(
-  sessions: SessionSummary[]
-): SessionSummary | null {
-  if (!sessions.length) return null;
-  const open = sessions.filter((s) => !s.ended_at);
-  const pool = open.length ? open : sessions;
-  return pool[0] ?? null;
+/** Prefer most recently created session. */
+export function pickDefaultSession(sessions: SessionSummary[]): SessionSummary | null {
+  return sessions[0] ?? null;
 }

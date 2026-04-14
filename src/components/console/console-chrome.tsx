@@ -2,15 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, ChevronDown, Code2, Eye, Loader2, Plug } from "lucide-react";
+import { Boxes, ChevronDown, Eye, Loader2 } from "lucide-react";
 import { useAgentId } from "@/contexts/agent-id-context";
 import { useOrgId } from "@/contexts/org-id-context";
 import { useEffect, useState } from "react";
 import { getAgent, patchAgentMeta } from "@/api/platform";
 
 const nav = [
-  { href: "/editor", label: "Editor", icon: Code2 },
-  { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/preview", label: "Preview", icon: Eye },
 ] as const;
 

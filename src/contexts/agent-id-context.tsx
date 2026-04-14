@@ -11,11 +11,6 @@ import React, {
 
 const STORAGE_KEY = "votrix-builder.agent-id";
 
-const defaultAgentId =
-  typeof process.env.NEXT_PUBLIC_AGENT_ID === "string"
-    ? process.env.NEXT_PUBLIC_AGENT_ID
-    : "";
-
 type AgentIdContextValue = {
   agentId: string;
   setAgentId: (id: string) => void;
@@ -24,7 +19,7 @@ type AgentIdContextValue = {
 const AgentIdContext = createContext<AgentIdContextValue | null>(null);
 
 export function AgentIdProvider({ children }: { children: React.ReactNode }) {
-  const [agentId, setAgentIdState] = useState(defaultAgentId);
+  const [agentId, setAgentIdState] = useState("");
 
   useEffect(() => {
     try {
@@ -37,8 +32,7 @@ export function AgentIdProvider({ children }: { children: React.ReactNode }) {
 
   const setAgentId = useCallback((id: string) => {
     const trimmed = id.trim();
-    const next = trimmed || defaultAgentId;
-    setAgentIdState(next);
+    setAgentIdState(trimmed);
     try {
       if (trimmed) localStorage.setItem(STORAGE_KEY, trimmed);
       else localStorage.removeItem(STORAGE_KEY);

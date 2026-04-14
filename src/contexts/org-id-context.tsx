@@ -11,11 +11,6 @@ import React, {
 
 const STORAGE_KEY = "votrix-builder.org-id";
 
-const defaultOrgId =
-  typeof process.env.NEXT_PUBLIC_ORG_ID === "string"
-    ? process.env.NEXT_PUBLIC_ORG_ID
-    : "";
-
 type OrgIdContextValue = {
   orgId: string;
   setOrgId: (id: string) => void;
@@ -24,7 +19,7 @@ type OrgIdContextValue = {
 const OrgIdContext = createContext<OrgIdContextValue | null>(null);
 
 export function OrgIdProvider({ children }: { children: React.ReactNode }) {
-  const [orgId, setOrgIdState] = useState(defaultOrgId);
+  const [orgId, setOrgIdState] = useState("");
 
   useEffect(() => {
     try {
@@ -37,8 +32,7 @@ export function OrgIdProvider({ children }: { children: React.ReactNode }) {
 
   const setOrgId = useCallback((id: string) => {
     const trimmed = id.trim();
-    const next = trimmed || defaultOrgId;
-    setOrgIdState(next);
+    setOrgIdState(trimmed);
     try {
       if (trimmed) localStorage.setItem(STORAGE_KEY, trimmed);
       else localStorage.removeItem(STORAGE_KEY);
