@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE!;
+const PREVIEW_KEY = "preview-dev-votrix-2025";
 
 // Matches backend SessionEventResponse schema
 export interface SessionEventRow {
@@ -57,8 +58,16 @@ export function sessionEventsToUiMessages(events: SessionEventRow[]): UIMessage[
   return out;
 }
 
-export async function fetchSessionUiMessages(sessionId: string): Promise<UIMessage[]> {
-  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}`);
+export async function fetchSessionUiMessages(
+  sessionId: string,
+  userId: string
+): Promise<UIMessage[]> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: {
+      "x-preview-key": PREVIEW_KEY,
+      "x-preview-user-id": userId,
+    },
+  });
   if (!res.ok) return [];
   const data = (await res.json()) as SessionDetailResponse;
   return sessionEventsToUiMessages(data.events ?? []);

@@ -3,6 +3,8 @@ import type { UIMessage } from "ai";
 import { extractLastUserText } from "@/lib/extract-last-user-text";
 import { votrixSseToAiUiMessageStream } from "@/lib/votrix-chat-stream";
 
+const PREVIEW_KEY = "preview-dev-votrix-2025";
+
 function getApiBase(): string {
   const base = process.env.NEXT_PUBLIC_API_BASE?.trim() || "http://localhost:8000";
   return base.replace(/\/$/, "");
@@ -19,7 +21,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const agentId = String(body.agent_id ?? "").trim();
   const userId = String(body.user_id ?? "").trim();
   const sessionId = String(body.session_id ?? "").trim();
   const messages = body.messages as UIMessage[] | undefined;
@@ -29,11 +30,9 @@ export async function POST(req: NextRequest) {
     ? (body.images as unknown[]).filter((u): u is string => typeof u === "string")
     : [];
 
-  if (!agentId || !userId || !sessionId) {
+  if (!userId || !sessionId) {
     return new Response(
-      JSON.stringify({
-        error: "agent_id, user_id, and session_id are required",
-      }),
+      JSON.stringify({ error: "user_id and session_id are required" }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -47,19 +46,17 @@ export async function POST(req: NextRequest) {
   }
 
   const apiBase = getApiBase();
-  const url = `${apiBase}/agents/${encodeURIComponent(agentId)}/chat`;
 
   let backendRes: Response;
   try {
-    backendRes = await fetch(url, {
+    backendRes = await fetch(`${apiBase}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        session_id: sessionId,
-        message,
-        images,
-      }),
+      headers: {
+        "Content-Type": "application/json",
+        "x-preview-key": PREVIEW_KEY,
+        "x-preview-user-id": userId,
+      },
+      body: JSON.stringify({ session_id: sessionId, message, images }),
       signal: req.signal,
     });
   } catch (e) {

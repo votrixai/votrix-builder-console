@@ -17,6 +17,7 @@ import {
   saveStoredUserIdInput,
   isUUID,
 } from "@/lib/preview-chat-identity";
+
 import {
   createSession,
   listUserSessions,
@@ -605,7 +606,8 @@ function PreviewChatSession({
 
 function sessionLabel(s: SessionSummary): string {
   const date = new Date(s.created_at).toLocaleDateString();
-  return `${s.display_name} · ${date}`;
+  const name = s.provider_session_title || s.agent_slug || "Session";
+  return `${name} · ${date}`;
 }
 
 export function PreviewChat() {
@@ -670,10 +672,10 @@ export function PreviewChat() {
     setConnectError(null);
   }, [agentId]);
 
-  const loadMessagesForSession = useCallback(async (sid: string) => {
+  const loadMessagesForSession = useCallback(async (sid: string, uid?: string) => {
     setHistoryLoading(true);
     try {
-      const msgs = await fetchSessionUiMessages(sid);
+      const msgs = await fetchSessionUiMessages(sid, uid ?? activeUserId ?? "");
       setBootMessages(msgs);
       setBootSeq((s) => s + 1);
     } catch {
@@ -687,7 +689,7 @@ export function PreviewChat() {
   // Auto-load messages when we restored a session from context.
   useEffect(() => {
     const { uid, sid } = restoredSessionRef.current;
-    if (uid && sid) void loadMessagesForSession(sid);
+    if (uid && sid) void loadMessagesForSession(sid, uid);
   }, [loadMessagesForSession]);
 
   const loadSessions = useCallback(async () => {
@@ -700,14 +702,14 @@ export function PreviewChat() {
     setConnecting(true);
     setConnectError(null);
     try {
-      const sessions = await listUserSessions(uid);
+      const sessions = await listUserSessions(uid, agentId);
       saveStoredUserIdInput(uid);
       setActiveUserId(uid);
       setSessionList(sessions);
       if (sessions.length > 0) {
         const sid = pickDefaultSession(sessions)!.id;
         setActiveSessionId(sid);
-        await loadMessagesForSession(sid);
+        await loadMessagesForSession(sid, uid);
       } else {
         setActiveSessionId(null);
         setBootMessages(null);
@@ -735,6 +737,7 @@ export function PreviewChat() {
     setConnectError(null);
     try {
       const created = await createSession(uid, agentId);
+
       saveStoredUserIdInput(uid);
       setActiveUserId(uid);
       setSessionList((prev) => [created, ...prev]);

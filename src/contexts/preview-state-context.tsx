@@ -30,7 +30,6 @@ export function PreviewStateProvider({
 }: {
   children: React.ReactNode;
 }) {
-  // Ref so that saving preview state never triggers re-renders in the layout.
   const stateRef = useRef<PreviewPersistedState | null>(null);
 
   const getState = useCallback(() => stateRef.current, []);
